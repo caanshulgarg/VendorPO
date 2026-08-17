@@ -355,11 +355,16 @@ async function createCompany(){
   if(error){ msg.textContent = error.message; return; }
 
   if(adminEmail && adminPass){
+    // signUp() switches the client's active session to the new user as a side effect —
+    // save the current (superadmin) session so we can restore it right after.
+    const savedSession = state.session;
     const { data: sdata, error: serr } = await sb.auth.signUp({ email: adminEmail, password: adminPass });
     if(serr){ msg.textContent = 'Company created, but admin account failed: '+serr.message; return; }
-    await sb.from('company_users').insert({
+    await sb.auth.setSession({ access_token: savedSession.access_token, refresh_token: savedSession.refresh_token });
+    const { error: cuErr } = await sb.from('company_users').insert({
       company_id: company.id, auth_user_id: sdata.user.id, email: adminEmail, role:'company_admin', name: adminEmail
     });
+    if(cuErr){ msg.textContent = 'Company created, but linking the admin failed: '+cuErr.message; return; }
   }
   await logActivity(company.id, 'created_company', 'company', company.id, {name});
   closeModal();
@@ -815,8 +820,10 @@ async function createTeamUser(){
   const role = document.getElementById('nu-role').value;
   const approval_level = parseInt(document.getElementById('nu-level').value)||1;
   const msg = document.getElementById('nu-msg');
+  const savedSession = state.session;
   const { data: sdata, error: serr } = await sb.auth.signUp({ email, password });
   if(serr){ msg.textContent = serr.message; return; }
+  await sb.auth.setSession({ access_token: savedSession.access_token, refresh_token: savedSession.refresh_token });
   const { error } = await sb.from('company_users').insert({
     company_id: state.company.id, auth_user_id: sdata.user.id, email, role, approval_level, name: email
   });
