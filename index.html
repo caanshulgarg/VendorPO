@@ -987,7 +987,7 @@ async function printPO(id){
     ${po.notes ? `<p style="margin-top:16px;"><strong>Notes:</strong> ${po.notes}</p>` : ''}
     ${po.expected_delivery_date ? `<p class="muted">Expected delivery: ${fmtDate(po.expected_delivery_date)}</p>` : ''}
     <button class="no-print" onclick="window.print()" style="margin-top:24px;padding:10px 18px;">Print / Save as PDF</button>
-    <script>window.onload = () => window.print();</script>
+    <scr`+`ipt>window.onload = () => window.print();</scr`+`ipt>
   </body></html>`;
   const w = window.open('', '_blank');
   if(!w){ toast('Please allow pop-ups to view/print the PO', true); return; }
