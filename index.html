@@ -352,9 +352,9 @@ function openNewCompanyModal(){
     <hr style="margin:14px 0;border-color:var(--border);">
     <p class="muted">First company admin (they'll receive login credentials):</p>
     <label>Admin email</label><input id="nc-admin-email"/>
-    <label style="margin-top:8px;display:block;">Admin temp password</label><input id="nc-admin-pass" type="text" placeholder="Set a temp password"/>
-    <button class="btn btn-primary" style="width:100%;margin-top:16px;" onclick="createCompany()">Create company</button>
-    <p class="muted" id="nc-msg"></p>
+    <label style="margin-top:8px;display:block;">Admin temp password (min 6 characters)</label><input id="nc-admin-pass" type="text" placeholder="Set a temp password"/>
+    <button class="btn btn-primary" style="width:100%;margin-top:16px;" id="nc-submit-btn" onclick="createCompany()">Create company</button>
+    <p style="margin-top:8px;font-size:13px;" id="nc-msg"></p>
   `);
 }
 async function createCompany(){
@@ -366,23 +366,43 @@ async function createCompany(){
   const adminEmail = document.getElementById('nc-admin-email').value.trim();
   const adminPass = document.getElementById('nc-admin-pass').value;
   const msg = document.getElementById('nc-msg');
+  const btn = document.getElementById('nc-submit-btn');
 
-  const { data: company, error } = await sb.from('companies').insert({name, slug, gstin, contact_email, approval_levels}).select().single();
-  if(error){ msg.textContent = error.message; return; }
+  msg.style.color = 'var(--red)';
+  msg.textContent = '';
 
-  if(adminEmail && adminPass){
-    // Use an isolated client so this signUp doesn't disturb our current (superadmin) session.
-    const { data: sdata, error: serr } = await scratchClient().auth.signUp({ email: adminEmail, password: adminPass });
-    if(serr){ msg.textContent = 'Company created, but admin account failed: '+serr.message; return; }
-    const { error: cuErr } = await sb.from('company_users').insert({
-      company_id: company.id, auth_user_id: sdata.user.id, email: adminEmail, role:'company_admin', name: adminEmail
-    });
-    if(cuErr){ msg.textContent = 'Company created, but linking the admin failed: '+cuErr.message; return; }
+  if(!name || !slug){ msg.textContent = 'Company name and slug are required.'; return; }
+  if(adminEmail && adminPass && adminPass.length < 6){ msg.textContent = 'Admin password must be at least 6 characters (Supabase minimum).'; return; }
+  if(adminPass && !adminEmail){ msg.textContent = 'Admin email is required if you set a password.'; return; }
+
+  btn.disabled = true;
+  btn.textContent = 'Creating…';
+
+  try{
+    const { data: company, error } = await sb.from('companies').insert({name, slug, gstin, contact_email, approval_levels}).select().single();
+    if(error){
+      msg.textContent = error.code === '23505' ? `That slug is already taken — pick a different one.` : error.message;
+      return;
+    }
+
+    if(adminEmail && adminPass){
+      // Use an isolated client so this signUp doesn't disturb our current (superadmin) session.
+      const { data: sdata, error: serr } = await scratchClient().auth.signUp({ email: adminEmail, password: adminPass });
+      if(serr){ msg.textContent = 'Company created, but admin account failed: '+serr.message+' — you can add the admin later from the company detail view.'; return; }
+      const { error: cuErr } = await sb.from('company_users').insert({
+        company_id: company.id, auth_user_id: sdata.user.id, email: adminEmail, role:'company_admin', name: adminEmail
+      });
+      if(cuErr){ msg.textContent = 'Company created, but linking the admin failed: '+cuErr.message; return; }
+    }
+    await logActivity(company.id, 'created_company', 'company', company.id, {name});
+    closeModal();
+    toast('Company created');
+    renderSuperadmin('companies');
+  } catch(e){
+    msg.textContent = 'Unexpected error: ' + (e.message || e);
+  } finally {
+    if(btn){ btn.disabled = false; btn.textContent = 'Create company'; }
   }
-  await logActivity(company.id, 'created_company', 'company', company.id, {name});
-  closeModal();
-  toast('Company created');
-  renderSuperadmin('companies');
 }
 async function toggleCompanyStatus(id, current){
   const next = current==='active' ? 'suspended' : 'active';
