@@ -470,7 +470,7 @@ async function renderCompanyApp(tab){
   }
 
   else if(state.activeTab === 'pos'){
-    const { data: pos } = await sb.from('purchase_orders').select('*, vendors(name)').eq('company_id',cid).order('created_at',{ascending:false});
+    const { data: pos, error: posErr } = await sb.from('purchase_orders').select('*, vendors(name)').eq('company_id',cid).order('created_at',{ascending:false});
     const yearSpent = (pos||[]).filter(p=>['sent','acknowledged','closed'].includes(p.status)).reduce((s,p)=>s+Number(p.total_amount),0);
     const budgetLine = state.company.annual_budget ? `<p class="muted">Committed spend: ${fmtMoney(yearSpent)} of ${fmtMoney(state.company.annual_budget)} budget${yearSpent > state.company.annual_budget ? ' <span class="badge badge-rejected">over budget</span>' : ''}</p>` : '';
     body += `<div class="card">
@@ -479,29 +479,32 @@ async function renderCompanyApp(tab){
         <button class="btn btn-primary" onclick="openNewPOModal()">+ New PO</button>
       </div>
       ${budgetLine}
+      ${posErr ? `<p style="color:var(--red);">Couldn't load purchase orders: ${posErr.message}</p>` : ''}
       <table style="margin-top:12px;">
         <tr><th>PO #</th><th>Vendor</th><th>Amount</th><th>Status</th><th>Created</th><th></th></tr>
         ${(pos||[]).map(p=>`<tr>
           <td>${p.po_number}</td><td>${p.vendors?.name||''}</td><td>${fmtMoney(p.total_amount)}</td>
           <td>${badge(p.status)}</td><td class="muted">${fmtDate(p.created_at)}</td>
           <td class="row-actions">
+            <button class="btn btn-sm" onclick="printPO('${p.id}')">Print / PDF</button>
             ${p.status==='pending_approval' ? `<button class="btn btn-sm" onclick='openPOApprovalModal(${JSON.stringify(p.id)})'>Review</button>` : ''}
             ${p.status==='draft' && !state.company.po_requires_approval ? `<button class="btn btn-sm btn-green" onclick="sendPO('${p.id}')">Send to vendor</button>`:''}
             ${p.status==='approved' ? `<button class="btn btn-sm btn-green" onclick="sendPO('${p.id}')">Send to vendor</button>`:''}
           </td>
-        </tr>`).join('')}
+        </tr>`).join('') || `<tr><td colspan="6" class="muted">${posErr ? '' : 'No purchase orders yet — click "+ New PO" to create one.'}</td></tr>`}
       </table>
     </div>`;
   }
 
   else if(state.activeTab === 'invoices'){
-    const { data: invs } = await sb.from('invoices').select('*, vendors(name), purchase_orders(po_number)').eq('company_id',cid).order('submitted_at',{ascending:false});
+    const { data: invs, error: invErr } = await sb.from('invoices').select('*, vendors(name), purchase_orders(po_number)').eq('company_id',cid).order('submitted_at',{ascending:false});
     window.__invoicesForExport = invs || [];
     body += `<div class="card">
       <div style="display:flex;justify-content:space-between;align-items:center;">
         <h3 style="margin:0;">Invoices</h3>
         <button class="btn btn-sm" onclick="exportInvoicesCSV()">Export CSV</button>
       </div>
+      ${invErr ? `<p style="color:var(--red);">Couldn't load invoices: ${invErr.message}</p>` : ''}
       <table>
         <tr><th>Invoice #</th><th>Vendor</th><th>PO</th><th>Amount</th><th>Status</th><th>Submitted</th><th></th></tr>
         ${(invs||[]).map(i=>`<tr>
@@ -511,19 +514,20 @@ async function renderCompanyApp(tab){
             <button class="btn btn-sm" onclick='openInvoiceModal(${JSON.stringify(i.id)})'>Review</button>
             ${isAdmin && i.status==='approved' ? `<button class="btn btn-sm btn-green" onclick='markInvoicePaid(${JSON.stringify(i.id)})'>Mark paid</button>` : ''}
           </td>
-        </tr>`).join('')}
+        </tr>`).join('') || `<tr><td colspan="7" class="muted">${invErr ? '' : 'No invoices submitted yet.'}</td></tr>`}
       </table>
     </div>`;
   }
 
   else if(state.activeTab === 'vendors'){
-    const { data: vendors } = await sb.from('vendors').select('*').eq('company_id',cid).order('created_at',{ascending:false});
+    const { data: vendors, error: vendErr } = await sb.from('vendors').select('*').eq('company_id',cid).order('created_at',{ascending:false});
     body += `<div class="card">
       <div style="display:flex;justify-content:space-between;align-items:center;">
         <h3 style="margin:0;">Vendors</h3>
         <button class="btn btn-primary" onclick="openNewVendorModal()">+ Add vendor</button>
       </div>
       <p class="muted">Or share your signup link: <code>yoursite.com/#/signup?slug=${state.company.slug}</code></p>
+      ${vendErr ? `<p style="color:var(--red);">Couldn't load vendors: ${vendErr.message}</p>` : ''}
       <table>
         <tr><th>Name</th><th>Email</th><th>GSTIN</th><th>Status</th><th></th></tr>
         ${(vendors||[]).map(v=>`<tr>
@@ -532,7 +536,7 @@ async function renderCompanyApp(tab){
             ${v.status==='pending'?`<button class="btn btn-sm btn-green" onclick="setVendorStatus('${v.id}','active')">Activate</button>`:''}
             ${v.status==='active'?`<button class="btn btn-sm btn-danger" onclick="setVendorStatus('${v.id}','disabled')">Disable</button>`:''}
           </td>
-        </tr>`).join('')}
+        </tr>`).join('') || `<tr><td colspan="5" class="muted">${vendErr ? '' : 'No vendors yet — click "+ Add vendor".'}</td></tr>`}
       </table>
     </div>`;
   }
@@ -565,10 +569,14 @@ async function renderCompanyApp(tab){
           <label>Annual budget (optional, soft cap)</label><input id="set-budget" type="number" value="${c.annual_budget||''}"/>
         </div>
         <div>
+          <label>Company GSTIN</label><input id="set-gstin" value="${c.gstin||''}" placeholder="e.g. 27ABCDE1234F1Z5"/>
+        </div>
+        <div>
           <label style="display:block;margin-bottom:4px;">Require approval before sending a PO to vendor</label>
           <select id="set-po-approval"><option value="false" ${!c.po_requires_approval?'selected':''}>No</option><option value="true" ${c.po_requires_approval?'selected':''}>Yes</option></select>
         </div>
       </div>
+      <p class="muted">Your GSTIN's state code is compared against each vendor's GSTIN to auto-determine CGST+SGST (same state) vs IGST (different state) on new POs.</p>
       <p class="muted">Approval levels for invoices${c.po_requires_approval?' and POs':''} (${c.approval_levels}) are set by your superadmin.</p>
       <button class="btn btn-primary" style="margin-top:12px;" onclick="saveCompanySettings()">Save settings</button>
       <p class="muted" id="set-msg"></p>
@@ -590,9 +598,14 @@ async function saveCompanySettings(){
   const currency = document.getElementById('set-currency').value.trim() || 'INR';
   const annual_budget = document.getElementById('set-budget').value ? parseFloat(document.getElementById('set-budget').value) : null;
   const po_requires_approval = document.getElementById('set-po-approval').value === 'true';
-  const { error } = await sb.from('companies').update({po_number_prefix, currency, annual_budget, po_requires_approval}).eq('id', state.company.id);
+  const gstin = document.getElementById('set-gstin').value.trim().toUpperCase();
+  if(gstin && !/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z][Z][0-9A-Z]$/.test(gstin)){
+    msg.textContent = 'That GSTIN doesn\'t match the standard 15-character format (e.g. 27ABCDE1234F1Z5).';
+    return;
+  }
+  const { error } = await sb.from('companies').update({po_number_prefix, currency, annual_budget, po_requires_approval, gstin}).eq('id', state.company.id);
   if(error){ msg.textContent = error.message; return; }
-  state.company = {...state.company, po_number_prefix, currency, annual_budget, po_requires_approval};
+  state.company = {...state.company, po_number_prefix, currency, annual_budget, po_requires_approval, gstin};
   toast('Settings saved');
 }
 async function loadTemplatesList(){
@@ -673,6 +686,57 @@ function exportInvoicesCSV(){
 }
 
 // ---- PO creation ----
+// ---- GST: CGST+SGST (intrastate) vs IGST (interstate) ----
+// Determined by comparing the first 2 digits (state code) of the company's GSTIN
+// and the selected vendor's GSTIN. If either is missing, we can't determine this
+// and fall back to showing GST as a single combined figure.
+function gstStateCode(gstin){
+  return (gstin && gstin.length >= 2) ? gstin.slice(0,2) : null;
+}
+function currentPOTaxSplit(){
+  const vendorSelect = document.getElementById('po-vendor');
+  const opt = vendorSelect?.options[vendorSelect.selectedIndex];
+  const vendorGstin = opt?.dataset?.gstin || '';
+  const companyGstin = state.company.gstin || '';
+  const cCode = gstStateCode(companyGstin);
+  const vCode = gstStateCode(vendorGstin);
+  if(!cCode || !vCode) return 'unknown';
+  return cCode === vCode ? 'intrastate' : 'interstate';
+}
+
+
+// Chapter-level HSN and common SAC prefixes mapped to the typical GST rate.
+// This is an indicative lookup only — many HSN codes have exceptions/notifications
+// that override the chapter default, so the rate is always editable after lookup.
+const HSN_GST_TABLE = {
+  // common goods chapters (2-digit HSN chapter prefix)
+  '01':5,'02':5,'03':5,'04':5,'07':5,'08':5,'09':5,'10':0,'11':5,'12':5,'15':5,'16':12,'17':5,
+  '19':18,'20':12,'21':18,'22':18,'25':5,'27':18,'28':18,'29':18,'30':12,'32':18,'33':18,'34':18,
+  '38':18,'39':18,'40':18,'42':28,'44':12,'48':12,'49':12,'52':5,'54':5,'61':12,'62':12,'63':5,
+  '64':18,'69':18,'70':18,'71':3,'72':18,'73':18,'74':18,'76':18,'82':18,'83':18,'84':18,'85':18,
+  '87':28,'90':18,'94':18,'95':12,'96':18,
+  // common SAC (services) prefixes — 6-digit, matched by first 6 or first 4
+  '9954':18,'9963':12,'9965':18,'9966':18,'9971':18,'9972':18,'9973':18,'9983':18,'9985':18,
+  '9987':18,'9988':18,'9997':18,'998311':18,'998313':18,'998714':18
+};
+function lookupGSTFromHSN(code){
+  if(!code) return null;
+  const c = code.trim();
+  if(HSN_GST_TABLE[c] !== undefined) return HSN_GST_TABLE[c];
+  if(c.length>=6 && HSN_GST_TABLE[c.slice(0,6)] !== undefined) return HSN_GST_TABLE[c.slice(0,6)];
+  if(c.length>=4 && HSN_GST_TABLE[c.slice(0,4)] !== undefined) return HSN_GST_TABLE[c.slice(0,4)];
+  if(c.length>=2 && HSN_GST_TABLE[c.slice(0,2)] !== undefined) return HSN_GST_TABLE[c.slice(0,2)];
+  return null;
+}
+function onHSNInput(id){
+  const hsn = document.getElementById(`po-item-hsn-${id}`)?.value;
+  const rate = lookupGSTFromHSN(hsn);
+  if(rate !== null){
+    document.getElementById(`po-item-gst-${id}`).value = rate;
+  }
+  recalcPOTotal();
+}
+
 let poItemCount = 0;
 function openNewPOModal(){
   poItemCount = 0;
@@ -684,13 +748,18 @@ function openNewPOModal(){
   loadVendorsIntoPOForm();
 }
 async function loadVendorsIntoPOForm(){
-  const { data: vendors } = await sb.from('vendors').select('id,name').eq('company_id', state.company.id).eq('status','active');
+  const { data: vendors, error: vErr } = await sb.from('vendors').select('id,name,gstin').eq('company_id', state.company.id).eq('status','active');
   const { data: templates } = await sb.from('po_templates').select('id,name').eq('company_id', state.company.id);
   const prefix = state.company.po_number_prefix || 'PO';
+  if(!state.company.gstin){
+    // nothing to do here yet — warning shown inline below once the form renders
+  }
   document.getElementById('po-form').innerHTML = `
     <label>PO Number</label><input id="po-number" value="${prefix}-${Date.now().toString().slice(-6)}"/>
     <label style="margin-top:8px;display:block;">Vendor</label>
-    <select id="po-vendor">${(vendors||[]).map(v=>`<option value="${v.id}">${v.name}</option>`).join('') || '<option>No active vendors — add one first</option>'}</select>
+    <select id="po-vendor" onchange="recalcPOTotal()">${(vendors||[]).map(v=>`<option value="${v.id}" data-gstin="${v.gstin||''}">${v.name}${v.gstin?'':' (no GSTIN on file)'}</option>`).join('') || '<option value="">— no active vendors, add one first —</option>'}</select>
+    ${vErr ? `<p style="color:var(--red);font-size:12px;">Couldn't load vendors: ${vErr.message}</p>` : ''}
+    ${!state.company.gstin ? `<p style="color:var(--amber);font-size:12px;">Your company has no GSTIN on file (Superadmin → company GSTIN) — CGST/SGST vs IGST can't be determined until it's set.</p>` : ''}
     <label style="margin-top:8px;display:block;">Expected delivery date</label><input id="po-date" type="date"/>
     ${(templates||[]).length ? `
     <label style="margin-top:8px;display:block;">Load from template</label>
@@ -699,16 +768,24 @@ async function loadVendorsIntoPOForm(){
       ${templates.map(t=>`<option value="${t.id}">${t.name}</option>`).join('')}
     </select>` : ''}
     <label style="margin-top:12px;display:block;">Items</label>
+    <div style="display:grid;grid-template-columns:2.2fr 1fr 0.8fr 1fr 0.8fr 1fr auto;gap:6px;font-size:11px;color:var(--muted);text-transform:uppercase;margin-bottom:2px;">
+      <span>Description</span><span>HSN/SAC</span><span>Qty</span><span>Unit price</span><span>GST %</span><span>Line total</span><span></span>
+    </div>
     <div id="po-items"></div>
     <button class="btn btn-sm" onclick="addPOItem()">+ Add item</button>
-    <p style="text-align:right;margin-top:10px;font-weight:600;">Total: <span id="po-total">₹0.00</span></p>
+    <p class="muted" style="font-size:11px;margin-top:4px;">GST % auto-fills from HSN/SAC where recognized (indicative only) — always double-check and edit if needed.</p>
+    <div style="text-align:right;margin-top:10px;font-size:13px;" id="po-tax-breakdown">
+      <div>Taxable amount: <span id="po-subtotal">₹0.00</span></div>
+      <div id="po-tax-lines"></div>
+      <div style="font-weight:700;font-size:15px;">Total: <span id="po-total">₹0.00</span></div>
+    </div>
     <label>Notes</label><textarea id="po-notes" rows="2"></textarea>
     ${state.company.po_requires_approval ? '<p class="muted">This company requires approval before a PO is sent to the vendor — it will be created as "pending approval".</p>' : ''}
     <div style="display:flex;gap:8px;margin-top:14px;">
       <button class="btn" style="flex:1;" onclick="saveAsTemplate()">Save items as template</button>
-      <button class="btn btn-primary" style="flex:1;" onclick="createPO()">Create PO</button>
+      <button class="btn btn-primary" style="flex:1;" id="po-submit-btn" onclick="createPO()">Create PO</button>
     </div>
-    <p class="muted" id="po-msg"></p>
+    <p style="margin-top:8px;font-size:13px;color:var(--red);" id="po-msg"></p>
   `;
   addPOItem();
 }
@@ -721,8 +798,10 @@ async function applyPOTemplate(templateId){
     addPOItem();
     const id = poItemCount;
     document.getElementById(`po-item-desc-${id}`).value = it.description || '';
+    document.getElementById(`po-item-hsn-${id}`).value = it.hsn || '';
     document.getElementById(`po-item-qty-${id}`).value = it.qty || 1;
     document.getElementById(`po-item-price-${id}`).value = it.unit_price || 0;
+    document.getElementById(`po-item-gst-${id}`).value = (it.gst_rate ?? '') === '' ? '' : it.gst_rate;
   });
   if(t.vendor_id) document.getElementById('po-vendor').value = t.vendor_id;
   recalcPOTotal();
@@ -743,10 +822,13 @@ function addPOItem(){
   const div = document.createElement('div');
   div.className = 'item-row';
   div.id = `po-item-${id}`;
+  div.style.gridTemplateColumns = '2.2fr 1fr 0.8fr 1fr 0.8fr 1fr auto';
   div.innerHTML = `
     <input placeholder="Description" oninput="recalcPOTotal()" id="po-item-desc-${id}"/>
+    <input placeholder="HSN/SAC" oninput="onHSNInput(${id})" id="po-item-hsn-${id}"/>
     <input type="number" placeholder="Qty" value="1" oninput="recalcPOTotal()" id="po-item-qty-${id}"/>
     <input type="number" placeholder="Unit price" oninput="recalcPOTotal()" id="po-item-price-${id}"/>
+    <input type="number" placeholder="GST%" oninput="recalcPOTotal()" id="po-item-gst-${id}"/>
     <span id="po-item-amt-${id}" class="muted">₹0.00</span>
     <button class="btn btn-sm btn-danger" onclick="document.getElementById('po-item-${id}').remove(); recalcPOTotal();">✕</button>
   `;
@@ -757,47 +839,160 @@ function collectPOItems(){
   document.querySelectorAll('#po-items .item-row').forEach(row=>{
     const id = row.id.split('-').pop();
     const desc = document.getElementById(`po-item-desc-${id}`)?.value;
+    const hsn = document.getElementById(`po-item-hsn-${id}`)?.value || '';
     const qty = parseFloat(document.getElementById(`po-item-qty-${id}`)?.value)||0;
     const price = parseFloat(document.getElementById(`po-item-price-${id}`)?.value)||0;
-    if(desc) items.push({description:desc, qty, unit_price:price, amount: qty*price});
+    const gst_rate = parseFloat(document.getElementById(`po-item-gst-${id}`)?.value)||0;
+    const taxable_amount = qty*price;
+    const tax_amount = taxable_amount * gst_rate/100;
+    if(desc) items.push({description:desc, hsn, qty, unit_price:price, gst_rate, taxable_amount, tax_amount, amount: taxable_amount + tax_amount});
   });
   return items;
 }
 function recalcPOTotal(){
+  const items = collectPOItems();
   document.querySelectorAll('#po-items .item-row').forEach(row=>{
     const id = row.id.split('-').pop();
     const qty = parseFloat(document.getElementById(`po-item-qty-${id}`)?.value)||0;
     const price = parseFloat(document.getElementById(`po-item-price-${id}`)?.value)||0;
-    document.getElementById(`po-item-amt-${id}`).textContent = fmtMoney(qty*price);
+    const gst_rate = parseFloat(document.getElementById(`po-item-gst-${id}`)?.value)||0;
+    const taxable = qty*price;
+    document.getElementById(`po-item-amt-${id}`).textContent = fmtMoney(taxable + taxable*gst_rate/100);
   });
-  const total = collectPOItems().reduce((s,i)=>s+i.amount,0);
-  document.getElementById('po-total').textContent = fmtMoney(total);
+  const subtotal = items.reduce((s,i)=>s+i.taxable_amount,0);
+  const tax = items.reduce((s,i)=>s+i.tax_amount,0);
+  const split = currentPOTaxSplit();
+  let taxLinesHtml = '';
+  if(split === 'intrastate'){
+    taxLinesHtml = `<div>CGST: ${fmtMoney(tax/2)}</div><div>SGST: ${fmtMoney(tax/2)}</div>`;
+  } else if(split === 'interstate'){
+    taxLinesHtml = `<div>IGST: ${fmtMoney(tax)}</div>`;
+  } else {
+    taxLinesHtml = `<div>GST (type undetermined — add GSTINs to split into CGST/SGST or IGST): ${fmtMoney(tax)}</div>`;
+  }
+  document.getElementById('po-subtotal').textContent = fmtMoney(subtotal);
+  document.getElementById('po-tax-lines').innerHTML = taxLinesHtml;
+  document.getElementById('po-total').textContent = fmtMoney(subtotal+tax);
 }
 async function createPO(){
   const msg = document.getElementById('po-msg');
+  const btn = document.getElementById('po-submit-btn');
+  msg.textContent = '';
   const po_number = document.getElementById('po-number').value.trim();
   const vendor_id = document.getElementById('po-vendor').value;
   const expected_delivery_date = document.getElementById('po-date').value || null;
   const notes = document.getElementById('po-notes').value;
   const items = collectPOItems();
-  const subtotal = items.reduce((s,i)=>s+i.amount,0);
-  if(!po_number || !vendor_id || items.length===0){ msg.textContent = 'PO number, vendor and at least one item are required.'; return; }
-  const initialStatus = state.company.po_requires_approval ? 'pending_approval' : 'draft';
-  const { data, error } = await sb.from('purchase_orders').insert({
-    company_id: state.company.id, po_number, vendor_id, items, subtotal,
-    tax_amount: 0, total_amount: subtotal, expected_delivery_date, notes,
-    created_by: state.profile.id, status: initialStatus
-  }).select().single();
-  if(error){ msg.textContent = error.message; return; }
-  await logActivity(state.company.id, 'created_po', 'purchase_order', data.id, {po_number});
-  closeModal();
-  toast(initialStatus==='pending_approval' ? 'PO created — pending approval' : 'PO created as draft');
-  renderCompanyApp('pos');
+  const subtotal = items.reduce((s,i)=>s+i.taxable_amount,0);
+  const tax_amount = items.reduce((s,i)=>s+i.tax_amount,0);
+  if(!po_number){ msg.textContent = 'PO number is required.'; return; }
+  if(!vendor_id){ msg.textContent = 'Select a vendor — if none are listed, add an active vendor first from the Vendors tab.'; return; }
+  if(items.length===0){ msg.textContent = 'Add at least one item.'; return; }
+
+  btn.disabled = true; btn.textContent = 'Creating…';
+  try{
+    const initialStatus = state.company.po_requires_approval ? 'pending_approval' : 'draft';
+    const split = currentPOTaxSplit();
+    const cgst_amount = split === 'intrastate' ? tax_amount/2 : 0;
+    const sgst_amount = split === 'intrastate' ? tax_amount/2 : 0;
+    const igst_amount = split === 'interstate' ? tax_amount : 0;
+    const { data, error } = await sb.from('purchase_orders').insert({
+      company_id: state.company.id, po_number, vendor_id, items, subtotal,
+      tax_amount, cgst_amount, sgst_amount, igst_amount, tax_type: split === 'unknown' ? null : split,
+      total_amount: subtotal+tax_amount, expected_delivery_date, notes,
+      created_by: state.profile.id, status: initialStatus
+    }).select().single();
+    if(error){ msg.textContent = error.code === '23505' ? 'That PO number is already used — pick a different one.' : error.message; return; }
+    await logActivity(state.company.id, 'created_po', 'purchase_order', data.id, {po_number});
+    closeModal();
+    toast(initialStatus==='pending_approval' ? 'PO created — pending approval' : 'PO created as draft');
+    renderCompanyApp('pos');
+  } catch(e){
+    msg.textContent = 'Unexpected error: ' + (e.message || e);
+  } finally {
+    if(btn){ btn.disabled = false; btn.textContent = 'Create PO'; }
+  }
 }
 async function sendPO(id){
   await sb.from('purchase_orders').update({status:'sent'}).eq('id', id);
   await logActivity(state.company.id, 'sent_po', 'purchase_order', id, {});
   toast('PO sent to vendor'); renderCompanyApp('pos');
+}
+
+// ---- Print / PDF export of a PO (opens a formatted print view; browser's
+// "Save as PDF" in the print dialog produces the actual PDF file) ----
+async function printPO(id){
+  const { data: po, error } = await sb.from('purchase_orders').select('*, vendors(*)').eq('id', id).single();
+  if(error){ toast('Could not load PO: '+error.message, true); return; }
+  const c = state.company;
+  const v = po.vendors;
+  const itemRows = (po.items||[]).map((it,idx)=>`
+    <tr>
+      <td>${idx+1}</td>
+      <td>${it.description||''}</td>
+      <td>${it.hsn||'-'}</td>
+      <td style="text-align:right;">${it.qty}</td>
+      <td style="text-align:right;">${fmtMoney(it.unit_price)}</td>
+      <td style="text-align:right;">${it.gst_rate||0}%</td>
+      <td style="text-align:right;">${fmtMoney((it.taxable_amount!==undefined?it.taxable_amount:it.qty*it.unit_price))}</td>
+    </tr>`).join('');
+  let taxRows = '';
+  if(po.tax_type === 'intrastate'){
+    taxRows = `<tr><td colspan="6" style="text-align:right;">CGST</td><td style="text-align:right;">${fmtMoney(po.cgst_amount)}</td></tr>
+               <tr><td colspan="6" style="text-align:right;">SGST</td><td style="text-align:right;">${fmtMoney(po.sgst_amount)}</td></tr>`;
+  } else if(po.tax_type === 'interstate'){
+    taxRows = `<tr><td colspan="6" style="text-align:right;">IGST</td><td style="text-align:right;">${fmtMoney(po.igst_amount)}</td></tr>`;
+  } else {
+    taxRows = `<tr><td colspan="6" style="text-align:right;">GST</td><td style="text-align:right;">${fmtMoney(po.tax_amount)}</td></tr>`;
+  }
+  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${po.po_number}</title>
+  <style>
+    body{font-family:Arial,Helvetica,sans-serif;color:#111;padding:32px;font-size:13px;}
+    h1{font-size:20px;margin:0 0 4px;}
+    .muted{color:#666;font-size:12px;}
+    table{width:100%;border-collapse:collapse;margin-top:16px;}
+    th,td{border:1px solid #ccc;padding:6px 8px;font-size:12px;}
+    th{background:#f4f5f7;text-align:left;}
+    .grid{display:flex;justify-content:space-between;margin-top:20px;}
+    .box{width:48%;}
+    .box h3{font-size:12px;text-transform:uppercase;color:#666;margin-bottom:4px;}
+    .total-row td{font-weight:bold;}
+    @media print{ .no-print{display:none;} }
+  </style></head><body>
+    <h1>Purchase Order</h1>
+    <p class="muted">PO Number: <strong>${po.po_number}</strong> &nbsp; | &nbsp; Date: ${fmtDate(po.created_at)} &nbsp; | &nbsp; Status: ${po.status}</p>
+    <div class="grid">
+      <div class="box">
+        <h3>From</h3>
+        <div><strong>${c.name}</strong></div>
+        <div>${c.address||''}</div>
+        <div>GSTIN: ${c.gstin||'—'}</div>
+        <div>${c.contact_email||''}</div>
+      </div>
+      <div class="box">
+        <h3>Vendor</h3>
+        <div><strong>${v?.name||''}</strong></div>
+        <div>${v?.address||''}</div>
+        <div>GSTIN: ${v?.gstin||'—'}</div>
+        <div>${v?.email||''}</div>
+      </div>
+    </div>
+    <table>
+      <tr><th>#</th><th>Description</th><th>HSN/SAC</th><th>Qty</th><th>Unit Price</th><th>GST%</th><th>Amount</th></tr>
+      ${itemRows}
+      <tr><td colspan="6" style="text-align:right;">Taxable amount</td><td style="text-align:right;">${fmtMoney(po.subtotal)}</td></tr>
+      ${taxRows}
+      <tr class="total-row"><td colspan="6" style="text-align:right;">Total</td><td style="text-align:right;">${fmtMoney(po.total_amount)}</td></tr>
+    </table>
+    ${po.notes ? `<p style="margin-top:16px;"><strong>Notes:</strong> ${po.notes}</p>` : ''}
+    ${po.expected_delivery_date ? `<p class="muted">Expected delivery: ${fmtDate(po.expected_delivery_date)}</p>` : ''}
+    <button class="no-print" onclick="window.print()" style="margin-top:24px;padding:10px 18px;">Print / Save as PDF</button>
+    <script>window.onload = () => window.print();</script>
+  </body></html>`;
+  const w = window.open('', '_blank');
+  if(!w){ toast('Please allow pop-ups to view/print the PO', true); return; }
+  w.document.write(html);
+  w.document.close();
 }
 
 // ---- Vendor management (company side) ----
@@ -818,8 +1013,14 @@ async function createVendor(){
   const name = document.getElementById('nv-name').value.trim();
   const email = document.getElementById('nv-email').value.trim();
   const phone = document.getElementById('nv-phone').value.trim();
-  const gstin = document.getElementById('nv-gstin').value.trim();
+  const gstin = document.getElementById('nv-gstin').value.trim().toUpperCase();
   const msg = document.getElementById('nv-msg');
+  msg.style.color = 'var(--red)';
+  if(!name || !email){ msg.textContent = 'Business name and email are required.'; return; }
+  if(gstin && !/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z][Z][0-9A-Z]$/.test(gstin)){
+    msg.textContent = 'That GSTIN doesn\'t match the standard 15-character format (e.g. 27ABCDE1234F1Z5) — double-check it, or leave it blank if unknown.';
+    return;
+  }
   const { data, error } = await sb.from('vendors').insert({
     company_id: state.company.id, name, email, phone, gstin, status:'pending'
   }).select().single();
