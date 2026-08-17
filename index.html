@@ -75,7 +75,39 @@
 // ============================================================
 const SUPABASE_URL = "YOUR_SUPABASE_URL";
 const SUPABASE_ANON_KEY = "YOUR_SUPABASE_ANON_KEY";
-const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+let sb = null;
+let CONFIG_ERROR = null;
+
+function isValidHttpUrl(str){
+  try {
+    const u = new URL(str);
+    return u.protocol === 'http:' || u.protocol === 'https:';
+  } catch(e){ return false; }
+}
+
+if(!SUPABASE_URL || SUPABASE_URL === "YOUR_SUPABASE_URL" || !isValidHttpUrl(SUPABASE_URL)){
+  CONFIG_ERROR = `SUPABASE_URL is missing or invalid: "${SUPABASE_URL}". It must look like https://xxxxxxxx.supabase.co (from Supabase → Settings → API → Project URL).`;
+} else if(!SUPABASE_ANON_KEY || SUPABASE_ANON_KEY === "YOUR_SUPABASE_ANON_KEY" || SUPABASE_ANON_KEY.length < 20){
+  CONFIG_ERROR = `SUPABASE_ANON_KEY is missing or looks invalid. Copy the "anon public" key from Supabase → Settings → API.`;
+} else {
+  try {
+    sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  } catch(e){
+    CONFIG_ERROR = `Supabase client failed to initialize: ${e.message}`;
+  }
+}
+
+function renderConfigError(){
+  document.getElementById('root').innerHTML = `
+  <div class="login-wrap">
+    <div class="card login-card" style="width:480px;">
+      <h2 style="margin-top:0;color:var(--red);">Setup needed</h2>
+      <p>${CONFIG_ERROR}</p>
+      <p class="muted">Open index.html, find the two lines near the top of the &lt;script&gt; tag (SUPABASE_URL and SUPABASE_ANON_KEY), and paste in your real values from your Supabase project's Settings → API page. Then re-save/re-upload the file.</p>
+    </div>
+  </div>`;
+}
 
 // ============================================================
 // STATE
@@ -122,10 +154,20 @@ async function logActivity(companyId, action, entityType, entityId, details){
 // AUTH / BOOTSTRAP
 // ============================================================
 async function boot(){
-  const { data: { session } } = await sb.auth.getSession();
-  state.session = session;
-  if(!session){ renderLogin(); return; }
-  await resolveRole();
+  if(CONFIG_ERROR){ renderConfigError(); return; }
+  try{
+    const { data: { session } } = await sb.auth.getSession();
+    state.session = session;
+    if(!session){ renderLogin(); return; }
+    await resolveRole();
+  } catch(e){
+    document.getElementById('root').innerHTML = `
+    <div class="login-wrap"><div class="card login-card" style="width:480px;">
+      <h2 style="margin-top:0;color:var(--red);">Something went wrong</h2>
+      <p>${e.message || e}</p>
+      <p class="muted">Open the browser console (F12) for more detail, or check that schema.sql has been run in your Supabase project.</p>
+    </div></div>`;
+  }
 }
 
 async function resolveRole(){
@@ -932,10 +974,20 @@ function closeModal(){
 // ============================================================
 // GO
 // ============================================================
-sb.auth.onAuthStateChange((event, session) => {
-  state.session = session;
-});
-boot();
+if(typeof supabase === 'undefined'){
+  document.getElementById('root').innerHTML = `
+  <div class="login-wrap"><div class="card login-card" style="width:480px;">
+    <h2 style="margin-top:0;color:var(--red);">Failed to load Supabase library</h2>
+    <p>The script from cdn.jsdelivr.net didn't load. Check your internet connection, or that your network/firewall isn't blocking cdn.jsdelivr.net, then reload the page.</p>
+  </div></div>`;
+} else if(sb){
+  sb.auth.onAuthStateChange((event, session) => {
+    state.session = session;
+  });
+  boot();
+} else {
+  boot(); // will render the CONFIG_ERROR message
+}
 </script>
 </body>
 </html>
