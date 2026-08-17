@@ -109,6 +109,17 @@ function renderConfigError(){
   </div>`;
 }
 
+// Creates a brand-new, isolated Supabase client (its own auth state, not persisted
+// to localStorage) purely for signing up OTHER users (company admins, team members).
+// This is necessary because calling auth.signUp() on the main `sb` client would
+// switch the CURRENT logged-in session over to the newly created user — which is
+// exactly what we don't want when a superadmin/admin is creating someone else's login.
+function scratchClient(){
+  return supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false }
+  });
+}
+
 // ============================================================
 // STATE
 // ============================================================
@@ -355,12 +366,9 @@ async function createCompany(){
   if(error){ msg.textContent = error.message; return; }
 
   if(adminEmail && adminPass){
-    // signUp() switches the client's active session to the new user as a side effect —
-    // save the current (superadmin) session so we can restore it right after.
-    const savedSession = state.session;
-    const { data: sdata, error: serr } = await sb.auth.signUp({ email: adminEmail, password: adminPass });
+    // Use an isolated client so this signUp doesn't disturb our current (superadmin) session.
+    const { data: sdata, error: serr } = await scratchClient().auth.signUp({ email: adminEmail, password: adminPass });
     if(serr){ msg.textContent = 'Company created, but admin account failed: '+serr.message; return; }
-    await sb.auth.setSession({ access_token: savedSession.access_token, refresh_token: savedSession.refresh_token });
     const { error: cuErr } = await sb.from('company_users').insert({
       company_id: company.id, auth_user_id: sdata.user.id, email: adminEmail, role:'company_admin', name: adminEmail
     });
@@ -820,10 +828,8 @@ async function createTeamUser(){
   const role = document.getElementById('nu-role').value;
   const approval_level = parseInt(document.getElementById('nu-level').value)||1;
   const msg = document.getElementById('nu-msg');
-  const savedSession = state.session;
-  const { data: sdata, error: serr } = await sb.auth.signUp({ email, password });
+  const { data: sdata, error: serr } = await scratchClient().auth.signUp({ email, password });
   if(serr){ msg.textContent = serr.message; return; }
-  await sb.auth.setSession({ access_token: savedSession.access_token, refresh_token: savedSession.refresh_token });
   const { error } = await sb.from('company_users').insert({
     company_id: state.company.id, auth_user_id: sdata.user.id, email, role, approval_level, name: email
   });
