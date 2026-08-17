@@ -183,20 +183,25 @@ async function boot(){
 
 async function resolveRole(){
   const uid = state.session.user.id;
+  const errors = [];
 
-  let { data: sa } = await sb.from('superadmins').select('*').eq('auth_user_id', uid).maybeSingle();
+  let { data: sa, error: saErr } = await sb.from('superadmins').select('*').eq('auth_user_id', uid).maybeSingle();
+  if(saErr) errors.push('superadmins: '+saErr.message);
   if(sa){ state.role='superadmin'; state.profile=sa; renderSuperadmin(); return; }
 
-  let { data: cu } = await sb.from('company_users').select('*, companies(*)').eq('auth_user_id', uid).maybeSingle();
+  let { data: cu, error: cuErr } = await sb.from('company_users').select('*, companies(*)').eq('auth_user_id', uid).maybeSingle();
+  if(cuErr) errors.push('company_users: '+cuErr.message);
   if(cu){ state.role = cu.role; state.profile = cu; state.company = cu.companies; renderCompanyApp(); return; }
 
-  let { data: v } = await sb.from('vendors').select('*, companies(*)').eq('auth_user_id', uid).maybeSingle();
+  let { data: v, error: vErr } = await sb.from('vendors').select('*, companies(*)').eq('auth_user_id', uid).maybeSingle();
+  if(vErr) errors.push('vendors: '+vErr.message);
   if(v){ state.role='vendor'; state.profile=v; state.company=v.companies; renderVendorApp(); return; }
 
-  // logged in but no role row found yet
-  document.getElementById('root').innerHTML = `<div class="login-wrap"><div class="card login-card">
+  // logged in but no role row found yet (or a query above errored — surface it so it's diagnosable)
+  document.getElementById('root').innerHTML = `<div class="login-wrap"><div class="card login-card" style="width:480px;">
     <p>Your account isn't linked to a company or vendor profile yet.</p>
     <p class="muted">Ask your company admin (or superadmin) to add you.</p>
+    ${errors.length ? `<p style="color:var(--red);font-size:12px;margin-top:10px;">Debug info: ${errors.join(' · ')}</p>` : `<p class="muted" style="font-size:12px;margin-top:10px;">Debug: no errors from the database — no matching row was found for this account (auth uid: ${uid}).</p>`}
     <button class="btn" onclick="signOut()">Sign out</button>
   </div></div>`;
 }
