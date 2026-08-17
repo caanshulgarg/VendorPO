@@ -1,0 +1,941 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>POFlow — PO & Vendor Invoice Management</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  :root{
+    --bg:#f4f5f7; --card:#ffffff; --border:#e2e4e9; --text:#1a1d24; --muted:#6b7280;
+    --primary:#2563eb; --primary-dark:#1d4ed8; --green:#16a34a; --red:#dc2626; --amber:#d97706;
+    --radius:10px;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--text);}
+  .app{max-width:1200px;margin:0 auto;padding:20px;}
+  header.topbar{display:flex;justify-content:space-between;align-items:center;padding:14px 20px;background:var(--card);border-bottom:1px solid var(--border);}
+  header.topbar h1{font-size:18px;margin:0;}
+  header.topbar .who{font-size:13px;color:var(--muted);}
+  .btn{padding:8px 14px;border-radius:8px;border:1px solid var(--border);background:var(--card);cursor:pointer;font-size:14px;}
+  .btn-primary{background:var(--primary);color:#fff;border:none;}
+  .btn-primary:hover{background:var(--primary-dark);}
+  .btn-danger{background:var(--red);color:#fff;border:none;}
+  .btn-green{background:var(--green);color:#fff;border:none;}
+  .btn-sm{padding:5px 10px;font-size:12px;}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:18px;margin-bottom:16px;}
+  .grid{display:grid;gap:16px;}
+  .grid-2{grid-template-columns:1fr 1fr;}
+  .grid-3{grid-template-columns:1fr 1fr 1fr;}
+  input,select,textarea{width:100%;padding:9px 10px;border:1px solid var(--border);border-radius:7px;font-size:14px;margin-top:4px;background:#fff;}
+  label{font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.02em;}
+  table{width:100%;border-collapse:collapse;font-size:14px;}
+  th,td{text-align:left;padding:9px 8px;border-bottom:1px solid var(--border);}
+  th{color:var(--muted);font-size:12px;text-transform:uppercase;}
+  .badge{padding:3px 9px;border-radius:20px;font-size:11px;font-weight:600;display:inline-block;}
+  .badge-draft{background:#e5e7eb;color:#374151;}
+  .badge-sent{background:#dbeafe;color:#1d4ed8;}
+  .badge-pending_approval{background:#fef3c7;color:#92400e;}
+  .badge-acknowledged{background:#dbeafe;color:#1d4ed8;}
+  .badge-closed{background:#e5e7eb;color:#374151;}
+  .badge-cancelled{background:#fee2e2;color:#b91c1c;}
+  .badge-submitted{background:#fef3c7;color:#92400e;}
+  .badge-under_review{background:#fef3c7;color:#92400e;}
+  .badge-approved{background:#dcfce7;color:#15803d;}
+  .badge-rejected{background:#fee2e2;color:#b91c1c;}
+  .badge-paid{background:#e0e7ff;color:#3730a3;}
+  .badge-active{background:#dcfce7;color:#15803d;}
+  .badge-pending{background:#fef3c7;color:#92400e;}
+  .badge-disabled,.badge-suspended{background:#fee2e2;color:#b91c1c;}
+  .tabs{display:flex;gap:4px;margin-bottom:16px;border-bottom:1px solid var(--border);}
+  .tab{padding:10px 16px;cursor:pointer;font-size:14px;color:var(--muted);border-bottom:2px solid transparent;}
+  .tab.active{color:var(--primary);border-bottom-color:var(--primary);font-weight:600;}
+  .login-wrap{display:flex;align-items:center;justify-content:center;min-height:100vh;}
+  .login-card{width:360px;}
+  .row-actions{display:flex;gap:6px;}
+  .muted{color:var(--muted);font-size:13px;}
+  .stat{font-size:26px;font-weight:700;}
+  .modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;z-index:50;}
+  .modal{background:#fff;border-radius:12px;padding:22px;width:460px;max-height:85vh;overflow:auto;}
+  .close-x{float:right;cursor:pointer;color:var(--muted);}
+  .toast{position:fixed;bottom:20px;right:20px;background:#1a1d24;color:#fff;padding:12px 18px;border-radius:8px;font-size:14px;z-index:100;}
+  .item-row{display:grid;grid-template-columns:3fr 1fr 1fr 1fr auto;gap:6px;align-items:center;margin-bottom:6px;}
+  .hidden{display:none;}
+  a{color:var(--primary);}
+</style>
+</head>
+<body>
+
+<div id="root"></div>
+<div id="toast-holder"></div>
+
+<script>
+// ============================================================
+// CONFIG — fill these in with your Supabase project details
+// ============================================================
+const SUPABASE_URL = "YOUR_SUPABASE_URL";
+const SUPABASE_ANON_KEY = "YOUR_SUPABASE_ANON_KEY";
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+// ============================================================
+// STATE
+// ============================================================
+let state = {
+  session: null,
+  role: null,          // 'superadmin' | 'company_admin' | 'approver' | 'staff' | 'vendor'
+  profile: null,        // row from superadmins / company_users / vendors
+  company: null,        // current company row (for non-superadmin)
+  activeTab: null,
+};
+
+function toast(msg, isError){
+  const el = document.createElement('div');
+  el.className = 'toast';
+  if(isError) el.style.background = '#b91c1c';
+  el.textContent = msg;
+  document.getElementById('toast-holder').appendChild(el);
+  setTimeout(()=>el.remove(), 3500);
+}
+
+function fmtMoney(n){
+  return '₹' + Number(n||0).toLocaleString('en-IN', {minimumFractionDigits:2, maximumFractionDigits:2});
+}
+function fmtDate(d){
+  if(!d) return '-';
+  return new Date(d).toLocaleDateString('en-IN', {day:'2-digit', month:'short', year:'numeric'});
+}
+function badge(status){
+  return `<span class="badge badge-${status}">${status.replace('_',' ')}</span>`;
+}
+async function logActivity(companyId, action, entityType, entityId, details){
+  try{
+    await sb.from('activity_log').insert({
+      company_id: companyId,
+      actor_auth_user_id: state.session.user.id,
+      actor_label: `${state.role}: ${state.profile?.name || state.profile?.email || ''}`,
+      action, entity_type: entityType, entity_id: entityId, details: details || {}
+    });
+  }catch(e){ console.warn('activity log failed', e); }
+}
+
+// ============================================================
+// AUTH / BOOTSTRAP
+// ============================================================
+async function boot(){
+  const { data: { session } } = await sb.auth.getSession();
+  state.session = session;
+  if(!session){ renderLogin(); return; }
+  await resolveRole();
+}
+
+async function resolveRole(){
+  const uid = state.session.user.id;
+
+  let { data: sa } = await sb.from('superadmins').select('*').eq('auth_user_id', uid).maybeSingle();
+  if(sa){ state.role='superadmin'; state.profile=sa; renderSuperadmin(); return; }
+
+  let { data: cu } = await sb.from('company_users').select('*, companies(*)').eq('auth_user_id', uid).maybeSingle();
+  if(cu){ state.role = cu.role; state.profile = cu; state.company = cu.companies; renderCompanyApp(); return; }
+
+  let { data: v } = await sb.from('vendors').select('*, companies(*)').eq('auth_user_id', uid).maybeSingle();
+  if(v){ state.role='vendor'; state.profile=v; state.company=v.companies; renderVendorApp(); return; }
+
+  // logged in but no role row found yet
+  document.getElementById('root').innerHTML = `<div class="login-wrap"><div class="card login-card">
+    <p>Your account isn't linked to a company or vendor profile yet.</p>
+    <p class="muted">Ask your company admin (or superadmin) to add you.</p>
+    <button class="btn" onclick="signOut()">Sign out</button>
+  </div></div>`;
+}
+
+async function signOut(){
+  await sb.auth.signOut();
+  state = {session:null, role:null, profile:null, company:null, activeTab:null};
+  renderLogin();
+}
+
+// ============================================================
+// LOGIN VIEW
+// ============================================================
+function renderLogin(){
+  document.getElementById('root').innerHTML = `
+  <div class="login-wrap">
+    <div class="card login-card">
+      <h2 style="margin-top:0;">POFlow</h2>
+      <p class="muted">PO & Vendor Invoice Management</p>
+      <div class="tabs" style="margin-bottom:14px;">
+        <div class="tab active" id="tab-signin" onclick="switchAuthTab('signin')">Sign in</div>
+        <div class="tab" id="tab-signup" onclick="switchAuthTab('signup')">Vendor sign up</div>
+      </div>
+      <div id="auth-signin">
+        <label>Email</label>
+        <input id="login-email" type="email" placeholder="you@company.com"/>
+        <label style="margin-top:10px;display:block;">Password</label>
+        <input id="login-pass" type="password" placeholder="••••••••"/>
+        <button class="btn btn-primary" style="width:100%;margin-top:14px;" onclick="doSignIn()">Sign in</button>
+        <p class="muted" id="login-msg" style="margin-top:8px;"></p>
+      </div>
+      <div id="auth-signup" class="hidden">
+        <p class="muted">Vendors: sign up, then wait for the company to activate your account.</p>
+        <label>Company invite code / slug</label>
+        <input id="signup-slug" placeholder="e.g. abc-traders"/>
+        <label style="margin-top:10px;display:block;">Vendor / Business name</label>
+        <input id="signup-name" placeholder="Your business name"/>
+        <label style="margin-top:10px;display:block;">Email</label>
+        <input id="signup-email" type="email"/>
+        <label style="margin-top:10px;display:block;">Password</label>
+        <input id="signup-pass" type="password"/>
+        <button class="btn btn-primary" style="width:100%;margin-top:14px;" onclick="doVendorSignup()">Create vendor account</button>
+        <p class="muted" id="signup-msg" style="margin-top:8px;"></p>
+      </div>
+    </div>
+  </div>`;
+}
+function switchAuthTab(t){
+  document.getElementById('tab-signin').classList.toggle('active', t==='signin');
+  document.getElementById('tab-signup').classList.toggle('active', t==='signup');
+  document.getElementById('auth-signin').classList.toggle('hidden', t!=='signin');
+  document.getElementById('auth-signup').classList.toggle('hidden', t!=='signup');
+}
+async function doSignIn(){
+  const email = document.getElementById('login-email').value.trim();
+  const password = document.getElementById('login-pass').value;
+  const { data, error } = await sb.auth.signInWithPassword({ email, password });
+  if(error){ document.getElementById('login-msg').textContent = error.message; return; }
+  state.session = data.session;
+  await resolveRole();
+}
+async function doVendorSignup(){
+  const slug = document.getElementById('signup-slug').value.trim();
+  const name = document.getElementById('signup-name').value.trim();
+  const email = document.getElementById('signup-email').value.trim();
+  const password = document.getElementById('signup-pass').value;
+  const msg = document.getElementById('signup-msg');
+  const { data: company, error: cerr } = await sb.from('companies').select('id,status').eq('slug', slug).maybeSingle();
+  if(cerr || !company){ msg.textContent = 'Company not found — check the invite code.'; return; }
+  const { data: sdata, error: serr } = await sb.auth.signUp({ email, password });
+  if(serr){ msg.textContent = serr.message; return; }
+  const { error: verr } = await sb.from('vendors').insert({
+    company_id: company.id, auth_user_id: sdata.user.id, name, email, status: 'pending'
+  });
+  if(verr){ msg.textContent = verr.message; return; }
+  msg.textContent = 'Account created. Waiting for company approval — check email to confirm your address.';
+}
+
+// ============================================================
+// SHARED SHELL
+// ============================================================
+function shell(title, roleLabel, bodyHtml){
+  return `
+  <header class="topbar">
+    <h1>POFlow ${title?('— '+title):''}</h1>
+    <div style="display:flex;align-items:center;gap:14px;">
+      <span class="who">${roleLabel}</span>
+      <button class="btn btn-sm" onclick="signOut()">Sign out</button>
+    </div>
+  </header>
+  <div class="app">${bodyHtml}</div>`;
+}
+
+// ============================================================
+// SUPERADMIN VIEW
+// ============================================================
+async function renderSuperadmin(tab){
+  state.activeTab = tab || state.activeTab || 'companies';
+  const { data: companies } = await sb.from('companies').select('*').order('created_at', {ascending:false});
+
+  let body = `<div class="tabs">
+    <div class="tab ${state.activeTab==='companies'?'active':''}" onclick="renderSuperadmin('companies')">Companies</div>
+    <div class="tab ${state.activeTab==='activity'?'active':''}" onclick="renderSuperadmin('activity')">Global Activity</div>
+  </div>`;
+
+  if(state.activeTab === 'companies'){
+    body += `<div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <h3 style="margin:0;">Companies (${companies.length})</h3>
+        <button class="btn btn-primary" onclick="openNewCompanyModal()">+ New company</button>
+      </div>
+      <table style="margin-top:12px;">
+        <tr><th>Name</th><th>Slug</th><th>Plan</th><th>Approval levels</th><th>Status</th><th></th></tr>
+        ${companies.map(c=>`
+          <tr>
+            <td>${c.name}</td>
+            <td class="muted">${c.slug}</td>
+            <td>${c.plan}</td>
+            <td>${c.approval_levels}</td>
+            <td>${badge(c.status)}</td>
+            <td class="row-actions">
+              <button class="btn btn-sm" onclick='openCompanyDetail(${JSON.stringify(c.id)})'>Manage</button>
+              <button class="btn btn-sm ${c.status==='active'?'btn-danger':'btn-green'}" onclick="toggleCompanyStatus('${c.id}','${c.status}')">${c.status==='active'?'Suspend':'Activate'}</button>
+            </td>
+          </tr>`).join('')}
+      </table>
+    </div>`;
+  } else {
+    const { data: log } = await sb.from('activity_log').select('*, companies(name)').order('created_at',{ascending:false}).limit(100);
+    body += `<div class="card"><h3 style="margin-top:0;">Recent activity (all companies)</h3>
+      <table><tr><th>When</th><th>Company</th><th>Actor</th><th>Action</th></tr>
+      ${(log||[]).map(l=>`<tr><td class="muted">${new Date(l.created_at).toLocaleString('en-IN')}</td><td>${l.companies?.name||''}</td><td>${l.actor_label||''}</td><td>${l.action}</td></tr>`).join('')}
+      </table></div>`;
+  }
+
+  document.getElementById('root').innerHTML = shell('Superadmin', `${state.profile.name || state.profile.email} · Superadmin`, body);
+}
+
+function openNewCompanyModal(){
+  showModal(`
+    <span class="close-x" onclick="closeModal()">✕</span>
+    <h3>New company</h3>
+    <label>Company name</label><input id="nc-name"/>
+    <label style="margin-top:8px;display:block;">Slug (used for vendor signup link)</label><input id="nc-slug" placeholder="e.g. abc-traders"/>
+    <label style="margin-top:8px;display:block;">GSTIN</label><input id="nc-gstin"/>
+    <label style="margin-top:8px;display:block;">Contact email</label><input id="nc-email"/>
+    <label style="margin-top:8px;display:block;">Approval levels</label><input id="nc-levels" type="number" value="1" min="1" max="5"/>
+    <hr style="margin:14px 0;border-color:var(--border);">
+    <p class="muted">First company admin (they'll receive login credentials):</p>
+    <label>Admin email</label><input id="nc-admin-email"/>
+    <label style="margin-top:8px;display:block;">Admin temp password</label><input id="nc-admin-pass" type="text" placeholder="Set a temp password"/>
+    <button class="btn btn-primary" style="width:100%;margin-top:16px;" onclick="createCompany()">Create company</button>
+    <p class="muted" id="nc-msg"></p>
+  `);
+}
+async function createCompany(){
+  const name = document.getElementById('nc-name').value.trim();
+  const slug = document.getElementById('nc-slug').value.trim();
+  const gstin = document.getElementById('nc-gstin').value.trim();
+  const contact_email = document.getElementById('nc-email').value.trim();
+  const approval_levels = parseInt(document.getElementById('nc-levels').value) || 1;
+  const adminEmail = document.getElementById('nc-admin-email').value.trim();
+  const adminPass = document.getElementById('nc-admin-pass').value;
+  const msg = document.getElementById('nc-msg');
+
+  const { data: company, error } = await sb.from('companies').insert({name, slug, gstin, contact_email, approval_levels}).select().single();
+  if(error){ msg.textContent = error.message; return; }
+
+  if(adminEmail && adminPass){
+    const { data: sdata, error: serr } = await sb.auth.signUp({ email: adminEmail, password: adminPass });
+    if(serr){ msg.textContent = 'Company created, but admin account failed: '+serr.message; return; }
+    await sb.from('company_users').insert({
+      company_id: company.id, auth_user_id: sdata.user.id, email: adminEmail, role:'company_admin', name: adminEmail
+    });
+  }
+  await logActivity(company.id, 'created_company', 'company', company.id, {name});
+  closeModal();
+  toast('Company created');
+  renderSuperadmin('companies');
+}
+async function toggleCompanyStatus(id, current){
+  const next = current==='active' ? 'suspended' : 'active';
+  await sb.from('companies').update({status: next}).eq('id', id);
+  toast(`Company ${next}`);
+  renderSuperadmin('companies');
+}
+async function openCompanyDetail(id){
+  const { data: c } = await sb.from('companies').select('*').eq('id',id).single();
+  const { data: users } = await sb.from('company_users').select('*').eq('company_id', id);
+  const { data: vendors } = await sb.from('vendors').select('*').eq('company_id', id);
+  const { data: pos } = await sb.from('purchase_orders').select('id').eq('company_id', id);
+  const { data: invs } = await sb.from('invoices').select('id,status').eq('company_id', id);
+  showModal(`
+    <span class="close-x" onclick="closeModal()">✕</span>
+    <h3>${c.name}</h3>
+    <p class="muted">${c.slug} · ${c.gstin||'no GSTIN on file'}</p>
+    <div class="grid grid-3">
+      <div class="card"><div class="stat">${users.length}</div><div class="muted">Staff users</div></div>
+      <div class="card"><div class="stat">${vendors.length}</div><div class="muted">Vendors</div></div>
+      <div class="card"><div class="stat">${pos.length}</div><div class="muted">POs</div></div>
+    </div>
+    <p class="muted" style="margin-top:10px;">Invoices: ${(invs||[]).length} total ·
+      ${(invs||[]).filter(i=>i.status==='approved').length} approved ·
+      ${(invs||[]).filter(i=>['submitted','under_review'].includes(i.status)).length} pending</p>
+    <label style="margin-top:10px;display:block;">Approval levels (invoices, and POs if PO approval is on)</label>
+    <input id="cd-levels" type="number" value="${c.approval_levels}" min="1" max="5"/>
+    <label style="margin-top:8px;display:block;">Annual budget (optional)</label>
+    <input id="cd-budget" type="number" value="${c.annual_budget||''}"/>
+    <button class="btn btn-primary" style="width:100%;margin-top:12px;" onclick="updateApprovalLevels('${id}')">Save</button>
+  `);
+}
+async function updateApprovalLevels(id){
+  const v = parseInt(document.getElementById('cd-levels').value)||1;
+  const budget = document.getElementById('cd-budget').value ? parseFloat(document.getElementById('cd-budget').value) : null;
+  await sb.from('companies').update({approval_levels:v, annual_budget: budget}).eq('id',id);
+  toast('Updated');
+  closeModal();
+  renderSuperadmin('companies');
+}
+
+// ============================================================
+// COMPANY APP (admin / approver / staff)
+// ============================================================
+async function renderCompanyApp(tab){
+  state.activeTab = tab || state.activeTab || 'dashboard';
+  const cid = state.company.id;
+  const isAdmin = state.role === 'company_admin';
+
+  let tabs = [['dashboard','Dashboard'],['pos','Purchase Orders'],['invoices','Invoices / Approvals'],['vendors','Vendors']];
+  if(isAdmin) tabs.push(['users','Team']);
+  if(isAdmin) tabs.push(['settings','Settings']);
+
+  let body = `<div class="tabs">${tabs.map(([k,l])=>`<div class="tab ${state.activeTab===k?'active':''}" onclick="renderCompanyApp('${k}')">${l}</div>`).join('')}</div>`;
+
+  if(state.activeTab === 'dashboard'){
+    const { data: pos } = await sb.from('purchase_orders').select('id,status').eq('company_id',cid);
+    const { data: invs } = await sb.from('invoices').select('id,status,total_amount').eq('company_id',cid);
+    const pending = (invs||[]).filter(i=>['submitted','under_review'].includes(i.status));
+    body += `<div class="grid grid-3">
+      <div class="card"><div class="stat">${(pos||[]).length}</div><div class="muted">Purchase orders</div></div>
+      <div class="card"><div class="stat">${pending.length}</div><div class="muted">Invoices pending approval</div></div>
+      <div class="card"><div class="stat">${fmtMoney((invs||[]).filter(i=>i.status==='approved').reduce((s,i)=>s+Number(i.total_amount),0))}</div><div class="muted">Approved (total value)</div></div>
+    </div>`;
+  }
+
+  else if(state.activeTab === 'pos'){
+    const { data: pos } = await sb.from('purchase_orders').select('*, vendors(name)').eq('company_id',cid).order('created_at',{ascending:false});
+    const yearSpent = (pos||[]).filter(p=>['sent','acknowledged','closed'].includes(p.status)).reduce((s,p)=>s+Number(p.total_amount),0);
+    const budgetLine = state.company.annual_budget ? `<p class="muted">Committed spend: ${fmtMoney(yearSpent)} of ${fmtMoney(state.company.annual_budget)} budget${yearSpent > state.company.annual_budget ? ' <span class="badge badge-rejected">over budget</span>' : ''}</p>` : '';
+    body += `<div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <h3 style="margin:0;">Purchase Orders</h3>
+        <button class="btn btn-primary" onclick="openNewPOModal()">+ New PO</button>
+      </div>
+      ${budgetLine}
+      <table style="margin-top:12px;">
+        <tr><th>PO #</th><th>Vendor</th><th>Amount</th><th>Status</th><th>Created</th><th></th></tr>
+        ${(pos||[]).map(p=>`<tr>
+          <td>${p.po_number}</td><td>${p.vendors?.name||''}</td><td>${fmtMoney(p.total_amount)}</td>
+          <td>${badge(p.status)}</td><td class="muted">${fmtDate(p.created_at)}</td>
+          <td class="row-actions">
+            ${p.status==='pending_approval' ? `<button class="btn btn-sm" onclick='openPOApprovalModal(${JSON.stringify(p.id)})'>Review</button>` : ''}
+            ${p.status==='draft' && !state.company.po_requires_approval ? `<button class="btn btn-sm btn-green" onclick="sendPO('${p.id}')">Send to vendor</button>`:''}
+            ${p.status==='approved' ? `<button class="btn btn-sm btn-green" onclick="sendPO('${p.id}')">Send to vendor</button>`:''}
+          </td>
+        </tr>`).join('')}
+      </table>
+    </div>`;
+  }
+
+  else if(state.activeTab === 'invoices'){
+    const { data: invs } = await sb.from('invoices').select('*, vendors(name), purchase_orders(po_number)').eq('company_id',cid).order('submitted_at',{ascending:false});
+    window.__invoicesForExport = invs || [];
+    body += `<div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <h3 style="margin:0;">Invoices</h3>
+        <button class="btn btn-sm" onclick="exportInvoicesCSV()">Export CSV</button>
+      </div>
+      <table>
+        <tr><th>Invoice #</th><th>Vendor</th><th>PO</th><th>Amount</th><th>Status</th><th>Submitted</th><th></th></tr>
+        ${(invs||[]).map(i=>`<tr>
+          <td>${i.invoice_number}</td><td>${i.vendors?.name||''}</td><td>${i.purchase_orders?.po_number||''}</td>
+          <td>${fmtMoney(i.total_amount)}</td><td>${badge(i.status)}${i.status==='paid'&&i.payment_reference?`<div class="muted">Ref: ${i.payment_reference}</div>`:''}</td><td class="muted">${fmtDate(i.submitted_at)}</td>
+          <td class="row-actions">
+            <button class="btn btn-sm" onclick='openInvoiceModal(${JSON.stringify(i.id)})'>Review</button>
+            ${isAdmin && i.status==='approved' ? `<button class="btn btn-sm btn-green" onclick='markInvoicePaid(${JSON.stringify(i.id)})'>Mark paid</button>` : ''}
+          </td>
+        </tr>`).join('')}
+      </table>
+    </div>`;
+  }
+
+  else if(state.activeTab === 'vendors'){
+    const { data: vendors } = await sb.from('vendors').select('*').eq('company_id',cid).order('created_at',{ascending:false});
+    body += `<div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <h3 style="margin:0;">Vendors</h3>
+        <button class="btn btn-primary" onclick="openNewVendorModal()">+ Add vendor</button>
+      </div>
+      <p class="muted">Or share your signup link: <code>yoursite.com/#/signup?slug=${state.company.slug}</code></p>
+      <table>
+        <tr><th>Name</th><th>Email</th><th>GSTIN</th><th>Status</th><th></th></tr>
+        ${(vendors||[]).map(v=>`<tr>
+          <td>${v.name}</td><td>${v.email}</td><td class="muted">${v.gstin||'-'}</td><td>${badge(v.status)}</td>
+          <td class="row-actions">
+            ${v.status==='pending'?`<button class="btn btn-sm btn-green" onclick="setVendorStatus('${v.id}','active')">Activate</button>`:''}
+            ${v.status==='active'?`<button class="btn btn-sm btn-danger" onclick="setVendorStatus('${v.id}','disabled')">Disable</button>`:''}
+          </td>
+        </tr>`).join('')}
+      </table>
+    </div>`;
+  }
+
+  else if(state.activeTab === 'users' && isAdmin){
+    const { data: users } = await sb.from('company_users').select('*').eq('company_id',cid);
+    body += `<div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <h3 style="margin:0;">Team</h3>
+        <button class="btn btn-primary" onclick="openNewUserModal()">+ Add team member</button>
+      </div>
+      <table><tr><th>Name</th><th>Email</th><th>Role</th><th>Approval level</th><th>Status</th></tr>
+      ${(users||[]).map(u=>`<tr><td>${u.name||''}</td><td>${u.email}</td><td>${u.role}</td><td>${u.approval_level||'-'}</td><td>${badge(u.status)}</td></tr>`).join('')}
+      </table>
+    </div>`;
+  }
+
+  else if(state.activeTab === 'settings' && isAdmin){
+    const c = state.company;
+    body += `<div class="card">
+      <h3 style="margin-top:0;">Company settings</h3>
+      <div class="grid grid-2">
+        <div>
+          <label>PO number prefix</label><input id="set-prefix" value="${c.po_number_prefix||'PO'}"/>
+        </div>
+        <div>
+          <label>Currency</label><input id="set-currency" value="${c.currency||'INR'}"/>
+        </div>
+        <div>
+          <label>Annual budget (optional, soft cap)</label><input id="set-budget" type="number" value="${c.annual_budget||''}"/>
+        </div>
+        <div>
+          <label style="display:block;margin-bottom:4px;">Require approval before sending a PO to vendor</label>
+          <select id="set-po-approval"><option value="false" ${!c.po_requires_approval?'selected':''}>No</option><option value="true" ${c.po_requires_approval?'selected':''}>Yes</option></select>
+        </div>
+      </div>
+      <p class="muted">Approval levels for invoices${c.po_requires_approval?' and POs':''} (${c.approval_levels}) are set by your superadmin.</p>
+      <button class="btn btn-primary" style="margin-top:12px;" onclick="saveCompanySettings()">Save settings</button>
+      <p class="muted" id="set-msg"></p>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0;">PO item templates</h3>
+      <p class="muted">Saved templates speed up recurring POs to the same vendor.</p>
+      <div id="templates-list">Loading…</div>
+    </div>`;
+  }
+
+  document.getElementById('root').innerHTML = shell(state.company.name, `${state.profile.name || state.profile.email} · ${state.role.replace('_',' ')}`, body);
+  if(state.activeTab === 'settings' && isAdmin) loadTemplatesList();
+}
+
+async function saveCompanySettings(){
+  const msg = document.getElementById('set-msg');
+  const po_number_prefix = document.getElementById('set-prefix').value.trim() || 'PO';
+  const currency = document.getElementById('set-currency').value.trim() || 'INR';
+  const annual_budget = document.getElementById('set-budget').value ? parseFloat(document.getElementById('set-budget').value) : null;
+  const po_requires_approval = document.getElementById('set-po-approval').value === 'true';
+  const { error } = await sb.from('companies').update({po_number_prefix, currency, annual_budget, po_requires_approval}).eq('id', state.company.id);
+  if(error){ msg.textContent = error.message; return; }
+  state.company = {...state.company, po_number_prefix, currency, annual_budget, po_requires_approval};
+  toast('Settings saved');
+}
+async function loadTemplatesList(){
+  const { data: templates } = await sb.from('po_templates').select('*, vendors(name)').eq('company_id', state.company.id).order('created_at',{ascending:false});
+  document.getElementById('templates-list').innerHTML = (templates||[]).length ? `
+    <table><tr><th>Name</th><th>Vendor</th><th>Items</th><th></th></tr>
+    ${templates.map(t=>`<tr><td>${t.name}</td><td>${t.vendors?.name||'-'}</td><td class="muted">${(t.items||[]).length} item(s)</td>
+      <td><button class="btn btn-sm btn-danger" onclick="deleteTemplate('${t.id}')">Delete</button></td></tr>`).join('')}
+    </table>` : '<p class="muted">No templates saved yet — save one from the "New PO" form.</p>';
+}
+async function deleteTemplate(id){
+  await sb.from('po_templates').delete().eq('id', id);
+  toast('Template deleted');
+  loadTemplatesList();
+}
+
+// ---- PO approval workflow ----
+async function openPOApprovalModal(id){
+  const { data: po } = await sb.from('purchase_orders').select('*, vendors(name)').eq('id',id).single();
+  const { data: history } = await sb.from('po_approvals').select('*, company_users(name,email)').eq('po_id', id).order('acted_at');
+  const levels = state.company.approval_levels || 1;
+  const canApprove = state.role === 'company_admin' || (state.role==='approver' && state.profile.approval_level === po.current_approval_level);
+  showModal(`
+    <span class="close-x" onclick="closeModal()">✕</span>
+    <h3>PO ${po.po_number}</h3>
+    <p class="muted">Vendor: ${po.vendors?.name}</p>
+    <p>Amount: <strong>${fmtMoney(po.total_amount)}</strong> · Approval level ${po.current_approval_level} of ${levels}</p>
+    <div style="margin-top:10px;">${(history||[]).length ? history.map(h=>`<p class="muted">${badge(h.action)} by ${h.company_users?.name||h.company_users?.email} on ${fmtDate(h.acted_at)} ${h.comments?('— '+h.comments):''}</p>`).join('') : '<p class="muted">No actions yet.</p>'}</div>
+    ${canApprove ? `
+      <label style="margin-top:10px;display:block;">Comments</label>
+      <textarea id="po-appr-comments" rows="2"></textarea>
+      <div style="display:flex;gap:8px;margin-top:10px;">
+        <button class="btn btn-green" style="flex:1;" onclick="actOnPO('${id}','approved')">Approve</button>
+        <button class="btn btn-danger" style="flex:1;" onclick="actOnPO('${id}','rejected')">Reject</button>
+      </div>
+    ` : '<p class="muted">Waiting on a different approval level.</p>'}
+  `);
+}
+async function actOnPO(id, action){
+  const comments = document.getElementById('po-appr-comments').value;
+  const { data: po } = await sb.from('purchase_orders').select('*').eq('id', id).single();
+  const levels = state.company.approval_levels || 1;
+  await sb.from('po_approvals').insert({ po_id: id, approver_id: state.profile.id, level: po.current_approval_level, action, comments });
+  if(action === 'rejected'){
+    await sb.from('purchase_orders').update({status:'rejected'}).eq('id', id);
+  } else {
+    if(po.current_approval_level >= levels){
+      await sb.from('purchase_orders').update({status:'approved'}).eq('id', id);
+    } else {
+      await sb.from('purchase_orders').update({status:'pending_approval', current_approval_level: po.current_approval_level+1}).eq('id', id);
+    }
+  }
+  await logActivity(state.company.id, `po_${action}`, 'purchase_order', id, {comments});
+  closeModal(); toast('Recorded'); renderCompanyApp('pos');
+}
+
+// ---- Mark invoice paid ----
+async function markInvoicePaid(id){
+  const ref = prompt('Payment reference (UTR / cheque no.) — optional:') || null;
+  await sb.from('invoices').update({status:'paid', payment_reference: ref, paid_at: new Date().toISOString()}).eq('id', id);
+  await logActivity(state.company.id, 'invoice_paid', 'invoice', id, {ref});
+  toast('Marked as paid'); renderCompanyApp('invoices');
+}
+
+// ---- CSV export ----
+function exportInvoicesCSV(){
+  const rows = window.__invoicesForExport || [];
+  const header = ['Invoice #','Vendor','PO','Amount','Tax','Total','Status','Submitted','Payment Ref'];
+  const lines = [header.join(',')];
+  rows.forEach(i=>{
+    lines.push([i.invoice_number, i.vendors?.name||'', i.purchase_orders?.po_number||'', i.amount, i.tax_amount, i.total_amount, i.status, i.submitted_at, i.payment_reference||''].map(v=>`"${String(v).replace(/"/g,'""')}"`).join(','));
+  });
+  const blob = new Blob([lines.join('\n')], {type:'text/csv'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `invoices_${state.company.slug}.csv`; a.click();
+  URL.revokeObjectURL(url);
+}
+
+// ---- PO creation ----
+let poItemCount = 0;
+function openNewPOModal(){
+  poItemCount = 0;
+  showModal(`
+    <span class="close-x" onclick="closeModal()">✕</span>
+    <h3>New Purchase Order</h3>
+    <div id="po-form"></div>
+  `);
+  loadVendorsIntoPOForm();
+}
+async function loadVendorsIntoPOForm(){
+  const { data: vendors } = await sb.from('vendors').select('id,name').eq('company_id', state.company.id).eq('status','active');
+  const { data: templates } = await sb.from('po_templates').select('id,name').eq('company_id', state.company.id);
+  const prefix = state.company.po_number_prefix || 'PO';
+  document.getElementById('po-form').innerHTML = `
+    <label>PO Number</label><input id="po-number" value="${prefix}-${Date.now().toString().slice(-6)}"/>
+    <label style="margin-top:8px;display:block;">Vendor</label>
+    <select id="po-vendor">${(vendors||[]).map(v=>`<option value="${v.id}">${v.name}</option>`).join('') || '<option>No active vendors — add one first</option>'}</select>
+    <label style="margin-top:8px;display:block;">Expected delivery date</label><input id="po-date" type="date"/>
+    ${(templates||[]).length ? `
+    <label style="margin-top:8px;display:block;">Load from template</label>
+    <select id="po-template" onchange="applyPOTemplate(this.value)">
+      <option value="">— none —</option>
+      ${templates.map(t=>`<option value="${t.id}">${t.name}</option>`).join('')}
+    </select>` : ''}
+    <label style="margin-top:12px;display:block;">Items</label>
+    <div id="po-items"></div>
+    <button class="btn btn-sm" onclick="addPOItem()">+ Add item</button>
+    <p style="text-align:right;margin-top:10px;font-weight:600;">Total: <span id="po-total">₹0.00</span></p>
+    <label>Notes</label><textarea id="po-notes" rows="2"></textarea>
+    ${state.company.po_requires_approval ? '<p class="muted">This company requires approval before a PO is sent to the vendor — it will be created as "pending approval".</p>' : ''}
+    <div style="display:flex;gap:8px;margin-top:14px;">
+      <button class="btn" style="flex:1;" onclick="saveAsTemplate()">Save items as template</button>
+      <button class="btn btn-primary" style="flex:1;" onclick="createPO()">Create PO</button>
+    </div>
+    <p class="muted" id="po-msg"></p>
+  `;
+  addPOItem();
+}
+async function applyPOTemplate(templateId){
+  if(!templateId) return;
+  const { data: t } = await sb.from('po_templates').select('*').eq('id', templateId).single();
+  document.getElementById('po-items').innerHTML = '';
+  poItemCount = 0;
+  (t.items||[]).forEach(it=>{
+    addPOItem();
+    const id = poItemCount;
+    document.getElementById(`po-item-desc-${id}`).value = it.description || '';
+    document.getElementById(`po-item-qty-${id}`).value = it.qty || 1;
+    document.getElementById(`po-item-price-${id}`).value = it.unit_price || 0;
+  });
+  if(t.vendor_id) document.getElementById('po-vendor').value = t.vendor_id;
+  recalcPOTotal();
+}
+async function saveAsTemplate(){
+  const name = prompt('Template name:');
+  if(!name) return;
+  const items = collectPOItems();
+  if(items.length===0){ toast('Add at least one item first', true); return; }
+  const vendor_id = document.getElementById('po-vendor').value || null;
+  const { error } = await sb.from('po_templates').insert({ company_id: state.company.id, name, vendor_id, items, created_by: state.profile.id });
+  if(error){ toast(error.message, true); return; }
+  toast('Template saved');
+}
+function addPOItem(){
+  poItemCount++;
+  const id = poItemCount;
+  const div = document.createElement('div');
+  div.className = 'item-row';
+  div.id = `po-item-${id}`;
+  div.innerHTML = `
+    <input placeholder="Description" oninput="recalcPOTotal()" id="po-item-desc-${id}"/>
+    <input type="number" placeholder="Qty" value="1" oninput="recalcPOTotal()" id="po-item-qty-${id}"/>
+    <input type="number" placeholder="Unit price" oninput="recalcPOTotal()" id="po-item-price-${id}"/>
+    <span id="po-item-amt-${id}" class="muted">₹0.00</span>
+    <button class="btn btn-sm btn-danger" onclick="document.getElementById('po-item-${id}').remove(); recalcPOTotal();">✕</button>
+  `;
+  document.getElementById('po-items').appendChild(div);
+}
+function collectPOItems(){
+  const items = [];
+  document.querySelectorAll('#po-items .item-row').forEach(row=>{
+    const id = row.id.split('-').pop();
+    const desc = document.getElementById(`po-item-desc-${id}`)?.value;
+    const qty = parseFloat(document.getElementById(`po-item-qty-${id}`)?.value)||0;
+    const price = parseFloat(document.getElementById(`po-item-price-${id}`)?.value)||0;
+    if(desc) items.push({description:desc, qty, unit_price:price, amount: qty*price});
+  });
+  return items;
+}
+function recalcPOTotal(){
+  document.querySelectorAll('#po-items .item-row').forEach(row=>{
+    const id = row.id.split('-').pop();
+    const qty = parseFloat(document.getElementById(`po-item-qty-${id}`)?.value)||0;
+    const price = parseFloat(document.getElementById(`po-item-price-${id}`)?.value)||0;
+    document.getElementById(`po-item-amt-${id}`).textContent = fmtMoney(qty*price);
+  });
+  const total = collectPOItems().reduce((s,i)=>s+i.amount,0);
+  document.getElementById('po-total').textContent = fmtMoney(total);
+}
+async function createPO(){
+  const msg = document.getElementById('po-msg');
+  const po_number = document.getElementById('po-number').value.trim();
+  const vendor_id = document.getElementById('po-vendor').value;
+  const expected_delivery_date = document.getElementById('po-date').value || null;
+  const notes = document.getElementById('po-notes').value;
+  const items = collectPOItems();
+  const subtotal = items.reduce((s,i)=>s+i.amount,0);
+  if(!po_number || !vendor_id || items.length===0){ msg.textContent = 'PO number, vendor and at least one item are required.'; return; }
+  const initialStatus = state.company.po_requires_approval ? 'pending_approval' : 'draft';
+  const { data, error } = await sb.from('purchase_orders').insert({
+    company_id: state.company.id, po_number, vendor_id, items, subtotal,
+    tax_amount: 0, total_amount: subtotal, expected_delivery_date, notes,
+    created_by: state.profile.id, status: initialStatus
+  }).select().single();
+  if(error){ msg.textContent = error.message; return; }
+  await logActivity(state.company.id, 'created_po', 'purchase_order', data.id, {po_number});
+  closeModal();
+  toast(initialStatus==='pending_approval' ? 'PO created — pending approval' : 'PO created as draft');
+  renderCompanyApp('pos');
+}
+async function sendPO(id){
+  await sb.from('purchase_orders').update({status:'sent'}).eq('id', id);
+  await logActivity(state.company.id, 'sent_po', 'purchase_order', id, {});
+  toast('PO sent to vendor'); renderCompanyApp('pos');
+}
+
+// ---- Vendor management (company side) ----
+function openNewVendorModal(){
+  showModal(`
+    <span class="close-x" onclick="closeModal()">✕</span>
+    <h3>Add vendor</h3>
+    <label>Business name</label><input id="nv-name"/>
+    <label style="margin-top:8px;display:block;">Email (they'll sign up with this)</label><input id="nv-email"/>
+    <label style="margin-top:8px;display:block;">Phone</label><input id="nv-phone"/>
+    <label style="margin-top:8px;display:block;">GSTIN</label><input id="nv-gstin"/>
+    <p class="muted">This pre-registers the vendor. They'll complete signup themselves using the company signup link, or you can invite them by email separately.</p>
+    <button class="btn btn-primary" style="width:100%;margin-top:10px;" onclick="createVendor()">Add vendor</button>
+    <p class="muted" id="nv-msg"></p>
+  `);
+}
+async function createVendor(){
+  const name = document.getElementById('nv-name').value.trim();
+  const email = document.getElementById('nv-email').value.trim();
+  const phone = document.getElementById('nv-phone').value.trim();
+  const gstin = document.getElementById('nv-gstin').value.trim();
+  const msg = document.getElementById('nv-msg');
+  const { data, error } = await sb.from('vendors').insert({
+    company_id: state.company.id, name, email, phone, gstin, status:'pending'
+  }).select().single();
+  if(error){ msg.textContent = error.message; return; }
+  await logActivity(state.company.id, 'added_vendor', 'vendor', data.id, {name});
+  closeModal(); toast('Vendor added (pending)'); renderCompanyApp('vendors');
+}
+async function setVendorStatus(id, status){
+  await sb.from('vendors').update({status}).eq('id', id);
+  await logActivity(state.company.id, 'vendor_status_'+status, 'vendor', id, {});
+  toast('Vendor '+status); renderCompanyApp('vendors');
+}
+
+// ---- Team management ----
+function openNewUserModal(){
+  showModal(`
+    <span class="close-x" onclick="closeModal()">✕</span>
+    <h3>Add team member</h3>
+    <label>Email</label><input id="nu-email"/>
+    <label style="margin-top:8px;display:block;">Temp password</label><input id="nu-pass"/>
+    <label style="margin-top:8px;display:block;">Role</label>
+    <select id="nu-role"><option value="staff">Staff</option><option value="approver">Approver</option><option value="company_admin">Company admin</option></select>
+    <label style="margin-top:8px;display:block;">Approval level (if approver)</label><input id="nu-level" type="number" value="1" min="1" max="5"/>
+    <button class="btn btn-primary" style="width:100%;margin-top:10px;" onclick="createTeamUser()">Add</button>
+    <p class="muted" id="nu-msg"></p>
+  `);
+}
+async function createTeamUser(){
+  const email = document.getElementById('nu-email').value.trim();
+  const password = document.getElementById('nu-pass').value;
+  const role = document.getElementById('nu-role').value;
+  const approval_level = parseInt(document.getElementById('nu-level').value)||1;
+  const msg = document.getElementById('nu-msg');
+  const { data: sdata, error: serr } = await sb.auth.signUp({ email, password });
+  if(serr){ msg.textContent = serr.message; return; }
+  const { error } = await sb.from('company_users').insert({
+    company_id: state.company.id, auth_user_id: sdata.user.id, email, role, approval_level, name: email
+  });
+  if(error){ msg.textContent = error.message; return; }
+  closeModal(); toast('Team member added'); renderCompanyApp('users');
+}
+
+// ---- Invoice review / approval ----
+async function openInvoiceModal(id){
+  const { data: inv } = await sb.from('invoices').select('*, vendors(name,email), purchase_orders(po_number,total_amount)').eq('id',id).single();
+  const { data: fileUrl } = await sb.storage.from('invoices').createSignedUrl(inv.file_path, 3600);
+  const { data: history } = await sb.from('approvals').select('*, company_users(name,email)').eq('invoice_id', id).order('acted_at');
+  const levels = state.company.approval_levels || 1;
+  const canApprove = state.role === 'company_admin' || (state.role==='approver' && state.profile.approval_level === inv.current_approval_level);
+
+  showModal(`
+    <span class="close-x" onclick="closeModal()">✕</span>
+    <h3>Invoice ${inv.invoice_number}</h3>
+    <p class="muted">Vendor: ${inv.vendors?.name} · PO: ${inv.purchase_orders?.po_number}</p>
+    <p>Amount: <strong>${fmtMoney(inv.total_amount)}</strong> &nbsp; Status: ${badge(inv.status)}</p>
+    <p>Approval progress: level ${inv.current_approval_level} of ${levels}</p>
+    ${fileUrl?.signedUrl ? `<p><a href="${fileUrl.signedUrl}" target="_blank">View invoice file →</a></p>` : ''}
+    <div style="margin-top:10px;">
+      <h4 style="margin-bottom:4px;">History</h4>
+      ${(history||[]).length ? history.map(h=>`<p class="muted">${badge(h.action)} by ${h.company_users?.name||h.company_users?.email} on ${fmtDate(h.acted_at)} ${h.comments?('— '+h.comments):''}</p>`).join('') : '<p class="muted">No actions yet.</p>'}
+    </div>
+    ${(canApprove && ['submitted','under_review'].includes(inv.status)) ? `
+      <label style="margin-top:10px;display:block;">Comments</label>
+      <textarea id="inv-comments" rows="2"></textarea>
+      <div style="display:flex;gap:8px;margin-top:10px;">
+        <button class="btn btn-green" style="flex:1;" onclick="actOnInvoice('${id}','approved')">Approve</button>
+        <button class="btn btn-danger" style="flex:1;" onclick="actOnInvoice('${id}','rejected')">Reject</button>
+      </div>
+    ` : (['submitted','under_review'].includes(inv.status) ? '<p class="muted">Waiting on a different approval level.</p>' : '')}
+  `);
+}
+async function actOnInvoice(id, action){
+  const comments = document.getElementById('inv-comments').value;
+  const { data: inv } = await sb.from('invoices').select('*').eq('id', id).single();
+  const levels = state.company.approval_levels || 1;
+
+  await sb.from('approvals').insert({
+    invoice_id: id, approver_id: state.profile.id, level: inv.current_approval_level, action, comments
+  });
+
+  if(action === 'rejected'){
+    await sb.from('invoices').update({status:'rejected', rejection_reason: comments}).eq('id', id);
+  } else {
+    if(inv.current_approval_level >= levels){
+      await sb.from('invoices').update({status:'approved'}).eq('id', id);
+    } else {
+      await sb.from('invoices').update({status:'under_review', current_approval_level: inv.current_approval_level+1}).eq('id', id);
+    }
+  }
+  await logActivity(state.company.id, `invoice_${action}`, 'invoice', id, {comments});
+  closeModal(); toast('Recorded'); renderCompanyApp('invoices');
+}
+
+// ============================================================
+// VENDOR APP
+// ============================================================
+async function renderVendorApp(tab){
+  state.activeTab = tab || state.activeTab || 'pos';
+  const vid = state.profile.id;
+
+  if(state.profile.status !== 'active'){
+    document.getElementById('root').innerHTML = shell(state.company.name, `${state.profile.name} · Vendor`, `
+      <div class="card"><p>Your account is <strong>${state.profile.status}</strong>. You'll be able to view POs and submit invoices once the company activates your account.</p></div>
+    `);
+    return;
+  }
+
+  let body = `<div class="tabs">
+    <div class="tab ${state.activeTab==='pos'?'active':''}" onclick="renderVendorApp('pos')">My Purchase Orders</div>
+    <div class="tab ${state.activeTab==='invoices'?'active':''}" onclick="renderVendorApp('invoices')">My Invoices</div>
+  </div>`;
+
+  if(state.activeTab === 'pos'){
+    const { data: pos } = await sb.from('purchase_orders').select('*').eq('vendor_id',vid).in('status',['sent','acknowledged','closed']).order('created_at',{ascending:false});
+    body += `<div class="card"><h3 style="margin-top:0;">Purchase Orders sent to you</h3>
+      <table><tr><th>PO #</th><th>Amount</th><th>Status</th><th>Expected delivery</th><th></th></tr>
+      ${(pos||[]).map(p=>`<tr>
+        <td>${p.po_number}</td><td>${fmtMoney(p.total_amount)}</td><td>${badge(p.status)}</td><td class="muted">${fmtDate(p.expected_delivery_date)}</td>
+        <td><button class="btn btn-sm btn-primary" onclick='openUploadInvoiceModal(${JSON.stringify(p.id)},${JSON.stringify(p.po_number)})'>Upload invoice</button></td>
+      </tr>`).join('') || '<tr><td colspan="5" class="muted">No POs yet.</td></tr>'}
+      </table>
+    </div>`;
+  } else {
+    const { data: invs } = await sb.from('invoices').select('*, purchase_orders(po_number)').eq('vendor_id',vid).order('submitted_at',{ascending:false});
+    body += `<div class="card"><h3 style="margin-top:0;">My submitted invoices</h3>
+      <table><tr><th>Invoice #</th><th>PO</th><th>Amount</th><th>Status</th><th>Submitted</th></tr>
+      ${(invs||[]).map(i=>`<tr>
+        <td>${i.invoice_number}</td><td>${i.purchase_orders?.po_number||''}</td><td>${fmtMoney(i.total_amount)}</td>
+        <td>${badge(i.status)}${i.status==='rejected'&&i.rejection_reason?`<div class="muted">${i.rejection_reason}</div>`:''}</td>
+        <td class="muted">${fmtDate(i.submitted_at)}</td>
+      </tr>`).join('') || '<tr><td colspan="5" class="muted">No invoices submitted yet.</td></tr>'}
+      </table>
+    </div>`;
+  }
+
+  document.getElementById('root').innerHTML = shell(state.company.name, `${state.profile.name} · Vendor`, body);
+}
+
+function openUploadInvoiceModal(poId, poNumber){
+  showModal(`
+    <span class="close-x" onclick="closeModal()">✕</span>
+    <h3>Upload invoice for ${poNumber}</h3>
+    <label>Invoice number</label><input id="ui-number"/>
+    <label style="margin-top:8px;display:block;">Invoice date</label><input id="ui-date" type="date"/>
+    <label style="margin-top:8px;display:block;">Amount (excl. tax)</label><input id="ui-amount" type="number"/>
+    <label style="margin-top:8px;display:block;">Tax amount</label><input id="ui-tax" type="number" value="0"/>
+    <label style="margin-top:8px;display:block;">Invoice file (PDF/image)</label><input id="ui-file" type="file" accept=".pdf,.jpg,.jpeg,.png"/>
+    <button class="btn btn-primary" style="width:100%;margin-top:14px;" onclick="submitInvoice('${poId}')">Submit for approval</button>
+    <p class="muted" id="ui-msg"></p>
+  `);
+}
+async function submitInvoice(poId){
+  const msg = document.getElementById('ui-msg');
+  const invoice_number = document.getElementById('ui-number').value.trim();
+  const invoice_date = document.getElementById('ui-date').value;
+  const amount = parseFloat(document.getElementById('ui-amount').value)||0;
+  const tax_amount = parseFloat(document.getElementById('ui-tax').value)||0;
+  const file = document.getElementById('ui-file').files[0];
+  if(!invoice_number || !invoice_date || !amount || !file){ msg.textContent = 'All fields and a file are required.'; return; }
+
+  const path = `${state.profile.id}/${Date.now()}_${file.name}`;
+  const { error: upErr } = await sb.storage.from('invoices').upload(path, file);
+  if(upErr){ msg.textContent = 'File upload failed: '+upErr.message; return; }
+
+  const { data, error } = await sb.from('invoices').insert({
+    company_id: state.company.id, po_id: poId, vendor_id: state.profile.id,
+    invoice_number, invoice_date, file_path: path, amount, tax_amount,
+    total_amount: amount+tax_amount, status:'submitted', current_approval_level: 1
+  }).select().single();
+  if(error){ msg.textContent = error.message; return; }
+  await logActivity(state.company.id, 'uploaded_invoice', 'invoice', data.id, {invoice_number});
+  closeModal(); toast('Invoice submitted for approval'); renderVendorApp('invoices');
+}
+
+// ============================================================
+// MODAL HELPERS
+// ============================================================
+function showModal(innerHtml){
+  const bg = document.createElement('div');
+  bg.className = 'modal-bg';
+  bg.id = 'active-modal-bg';
+  bg.innerHTML = `<div class="modal">${innerHtml}</div>`;
+  document.body.appendChild(bg);
+}
+function closeModal(){
+  const el = document.getElementById('active-modal-bg');
+  if(el) el.remove();
+}
+
+// ============================================================
+// GO
+// ============================================================
+sb.auth.onAuthStateChange((event, session) => {
+  state.session = session;
+});
+boot();
+</script>
+</body>
+</html>
