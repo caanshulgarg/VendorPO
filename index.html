@@ -582,6 +582,28 @@ async function renderCompanyApp(tab){
       <p class="muted" id="set-msg"></p>
     </div>
     <div class="card">
+      <h3 style="margin-top:0;">Letterhead & legal details (printed on PO PDF)</h3>
+      <div class="grid grid-2">
+        <div><label>Office address</label><textarea id="set-address" rows="2">${c.address||''}</textarea></div>
+        <div><label>Registered office</label><textarea id="set-regoffice" rows="2">${c.registered_office||''}</textarea></div>
+        <div><label>PAN</label><input id="set-pan" value="${c.pan||''}"/></div>
+        <div><label>CIN</label><input id="set-cin" value="${c.cin||''}"/></div>
+        <div><label>State</label><input id="set-state" value="${c.state||''}"/></div>
+        <div><label>State code</label><input id="set-statecode" value="${c.state_code||''}"/></div>
+        <div><label>Phone</label><input id="set-phone" value="${c.contact_phone||''}"/></div>
+        <div><label>Fax</label><input id="set-fax" value="${c.fax||''}"/></div>
+        <div><label>Website</label><input id="set-website" value="${c.website||''}"/></div>
+        <div><label>Authorised signatory name</label><input id="set-signatory" value="${c.authorised_signatory||''}"/></div>
+      </div>
+      <label style="margin-top:10px;display:block;">Payment terms (printed on PO)</label>
+      <textarea id="set-payterms" rows="2">${c.po_payment_terms||''}</textarea>
+      <label style="margin-top:10px;display:block;">General conditions / T&amp;C annexure (leave blank to use the built-in standard template)</label>
+      <textarea id="set-terms" rows="5" placeholder="Leave blank to use the built-in standard commercial terms, or paste your own legal-approved terms here.">${c.po_terms||''}</textarea>
+      <p class="muted">The built-in template is a generic set of standard purchase conditions — have your legal team review or replace it before using live.</p>
+      <button class="btn btn-primary" style="margin-top:10px;" onclick="saveLetterhead()">Save letterhead & terms</button>
+      <p class="muted" id="set-lh-msg"></p>
+    </div>
+    <div class="card">
       <h3 style="margin-top:0;">PO item templates</h3>
       <p class="muted">Saved templates speed up recurring POs to the same vendor.</p>
       <div id="templates-list">Loading…</div>
@@ -607,6 +629,27 @@ async function saveCompanySettings(){
   if(error){ msg.textContent = error.message; return; }
   state.company = {...state.company, po_number_prefix, currency, annual_budget, po_requires_approval, gstin};
   toast('Settings saved');
+}
+async function saveLetterhead(){
+  const msg = document.getElementById('set-lh-msg');
+  const patch = {
+    address: document.getElementById('set-address').value.trim() || null,
+    registered_office: document.getElementById('set-regoffice').value.trim() || null,
+    pan: document.getElementById('set-pan').value.trim().toUpperCase() || null,
+    cin: document.getElementById('set-cin').value.trim().toUpperCase() || null,
+    state: document.getElementById('set-state').value.trim() || null,
+    state_code: document.getElementById('set-statecode').value.trim() || null,
+    contact_phone: document.getElementById('set-phone').value.trim() || null,
+    fax: document.getElementById('set-fax').value.trim() || null,
+    website: document.getElementById('set-website').value.trim() || null,
+    authorised_signatory: document.getElementById('set-signatory').value.trim() || null,
+    po_payment_terms: document.getElementById('set-payterms').value.trim() || null,
+    po_terms: document.getElementById('set-terms').value.trim() || null
+  };
+  const { error } = await sb.from('companies').update(patch).eq('id', state.company.id);
+  if(error){ msg.style.color='var(--red)'; msg.textContent = error.message; return; }
+  state.company = {...state.company, ...patch};
+  toast('Letterhead & terms saved');
 }
 async function loadTemplatesList(){
   const { data: templates } = await sb.from('po_templates').select('*, vendors(name)').eq('company_id', state.company.id).order('created_at',{ascending:false});
@@ -919,74 +962,237 @@ async function sendPO(id){
   toast('PO sent to vendor'); renderCompanyApp('pos');
 }
 
+// Default general conditions printed on the PO annexure. Companies can override
+// this with their own text via Settings → PO Terms. This is a generic template of
+// standard commercial purchase conditions — companies should have their legal team
+// review/replace it with their own approved terms before using in production.
+const DEFAULT_PO_TERMS = `1. GENERAL
+1.1 This Purchase Order ("PO") together with these General Conditions constitutes the agreement between the Company (the buyer named above) and the Supplier for the supply of the goods and/or services described herein. The Supplier's own terms and conditions shall not apply unless expressly agreed in writing by the Company. In case of conflict, these Conditions shall prevail over any terms on the Supplier's invoice or other documents.
+
+2. ACCEPTANCE
+2.1 The Company will not be liable for any order unless issued through an official PO.
+2.2 Acceptance of the PO takes place if the Supplier accepts it in writing within three (3) working days of receipt, or by commencing manufacture, shipment, delivery of the goods, or performance of the services. If written acceptance is not received within three (3) working days, the PO will be deemed accepted by the Supplier.
+2.3 Any conditional acceptance or reservation must be notified to the Company in writing within three (3) days of receipt of the PO, failing which the PO is deemed accepted as issued.
+
+3. DELIVERY, TRANSPORTATION & PACKING
+3.1 The Supplier must meet the delivery/completion date specified in the PO. Time is of the essence. Failure to comply may lead to refusal of goods and/or services, with the Supplier bearing any additional costs.
+3.2 Goods shall be delivered to the delivery address specified. In respect of services, services shall be performed at the location specified in the PO. The Supplier and its employees shall comply with the Company's site safety and security policies.
+3.3 Unless stated otherwise, all goods shall be properly protected against damage and deterioration in transit and delivered on a Delivered Duty Paid basis, with a clear description and quantity of contents.
+3.4 Unless otherwise stated in the PO, the Supplier will not charge for containers, packaging, crating, boxing, or storage.
+3.5 The Company assumes no obligation to accept goods shipped in excess of the quantity ordered.
+
+4. WARRANTIES, LIABILITY & INSURANCE
+4.1 The Supplier warrants that all goods supplied will: be free from defects in design, material and workmanship; comply with the PO and any applicable specifications; be fit for their intended purpose; and meet the Company's requirements in all respects.
+4.2 The Supplier shall provide services using reasonable skill, care and diligence, utilising suitably skilled, experienced and qualified staff, and employing the best workmanship and materials.
+4.3 The Supplier represents and warrants that there are no third-party claims relating to the goods and/or services, that it complies with all applicable central, state and local laws, and that it holds all requisite approvals, registrations and consents required under applicable law.
+4.4 All goods and services will comply with all applicable laws, regulations and codes of practice, including those relating to fair and minimum wages, data privacy, and prohibition of child labour.
+4.5 The Supplier agrees to indemnify the Company in full against all claims, liability, loss, damages, costs and expenses arising out of or in connection with any personal injury or death, damage to property, breach of warranty, infringement of intellectual property rights, or any act or omission by the Supplier or its employees, agents or sub-contractors.
+4.6 The Supplier shall maintain adequate insurance in respect of its liabilities under this PO and shall provide evidence of such insurance on request.
+
+5. INSPECTION AND TESTING
+5.1 The Company has the right, after reasonable notice, to inspect or test the goods and/or services at the Supplier's or its sub-contractor's facilities. Inspection or testing does not relieve the Supplier of any liability, nor imply acceptance.
+5.2 If any defect is discovered at any time, the Company reserves the right to deduct the cost of defective goods and/or services from any amount owed to the Supplier.
+
+6. DOCUMENTATION
+6.1 The Supplier will provide, free of charge, all working drawings, operating instructions, specifications and information reasonably necessary to enable use of the goods or services for their intended purpose, together with certificates of origin, quantity, quality and compliance as reasonably required.
+6.2 The Supplier will, on the day of delivery/completion, send a separate advice note and invoice for each delivery or service itemised in the PO.
+
+7. TRANSFER OF TITLE AND RISK
+7.1 Risk of loss or damage will not pass to the Company until the goods have been delivered into the Company's possession and confirmed to be in accordance with the PO.
+7.2 Title to the goods passes to the Company on delivery, unless payment is made prior to delivery, in which case title (but not risk) passes upon payment.
+
+8. PRICE AND PAYMENT
+8.1 The price shall be as stated in the PO and, unless otherwise stated, exclusive of applicable GST. No additional charges will be paid unless agreed in writing in advance.
+8.2 The Supplier shall provide a proper tax invoice in the form, manner and within the time prescribed under GST law, quoting the valid PO number and the Company's GSTIN. Failure to do so may result in the Company withholding payment.
+8.3 The invoice must be reported in the Supplier's Form GSTR-1 and reflected in the Company's Form GSTR-2A/2B. Tax charged must be deposited with the Government in time. If input tax credit is denied to the Company due to reasons attributable to the Supplier, the Supplier shall indemnify the Company for the loss, including interest and penalty.
+8.4 The Company shall be entitled to deduct tax at source at applicable rates under the Income-tax Act, 1961.
+8.5 Payment shall be made within sixty (60) days from the date of receipt of a correct and complete invoice unless otherwise stated in the PO. Where the Supplier is a registered Micro, Small or Medium Enterprise (MSME), payment shall be made within forty-five (45) days.
+8.6 The Company may set off any amounts payable to the Supplier against any amounts the Supplier owes to the Company.
+
+9. ETHICS & COMPLIANCE
+9.1 The Supplier warrants that it has not and will not violate any applicable anti-bribery, anti-corruption, trade sanctions or anti-money-laundering laws in connection with this PO.
+9.2 The Supplier shall not, directly or indirectly, offer, give, request or accept any bribe, kickback, or improper payment to obtain or retain business or an undue advantage.
+9.3 The Supplier shall make its books and records relating to this PO available to the Company for inspection or audit on request.
+
+10. INTELLECTUAL PROPERTY
+10.1 All intellectual property rights in any works, materials, designs, specifications or documents generated or developed in the course of performing this PO shall be the exclusive property of the Company.
+10.2 The Supplier shall not acquire any right, title or interest in the Company's trademarks or other intellectual property, and shall use them only as authorised and solely for the purpose of fulfilling this PO.
+
+11. CONFIDENTIALITY & DATA PROTECTION
+11.1 The Supplier shall treat all information provided by or on behalf of the Company as confidential, use it only for the purposes of this PO, and protect it with at least reasonable care.
+11.2 The Supplier shall implement appropriate technical and organisational security measures to protect any personal data accessed in the course of providing goods/services, and shall process such personal data only in accordance with the Company's instructions and applicable data protection laws.
+11.3 Upon expiry or termination, the Supplier shall promptly return or securely destroy all confidential information and personal data, unless retention is required by law.
+
+12. TERMINATION & CANCELLATION
+12.1 The Company may terminate this PO immediately by written notice if the Supplier becomes insolvent, enters bankruptcy, liquidation or receivership, makes an arrangement with creditors, or ceases to carry on business.
+12.2 If goods and/or services are not supplied in accordance with the PO, the Company may require the Supplier to remedy the default within a reasonable period, failing which the Company may terminate and claim damages.
+12.3 The Company may cancel the PO in whole or in part by written notice. On cancellation the Supplier shall return all Company property.
+
+13. ASSIGNMENT & SUB-CONTRACTING
+13.1 The Company may assign this PO. The Supplier shall not assign or sub-contract its obligations without the Company's prior written consent, and remains fully responsible for any permitted sub-contractor.
+
+14. DISPUTE RESOLUTION & JURISDICTION
+14.1 Any dispute shall be referred to arbitration before a sole arbitrator under the Arbitration and Conciliation Act, 1996. The language shall be English and the seat and venue as specified by the Company. The courts having jurisdiction over the Company's registered office shall have exclusive jurisdiction.
+
+15. MISCELLANEOUS
+15.1 Notices shall be given in writing to the registered address of the relevant party.
+15.2 Neither party shall be liable for delay or non-performance caused by Force Majeure, provided prompt written notice is given.
+15.3 This PO constitutes the entire agreement regarding its subject matter and may only be modified in writing signed by both parties. No waiver is effective unless in writing. If any provision is held void or unenforceable, the remaining provisions continue in effect.`;
+
+// ---- number to Indian-format words (for PO amount in words) ----
+function numberToWordsIndian(num){
+  num = Math.round(Number(num)||0);
+  if(num === 0) return 'Zero';
+  const ones = ['','One','Two','Three','Four','Five','Six','Seven','Eight','Nine','Ten','Eleven','Twelve','Thirteen','Fourteen','Fifteen','Sixteen','Seventeen','Eighteen','Nineteen'];
+  const tens = ['','','Twenty','Thirty','Forty','Fifty','Sixty','Seventy','Eighty','Ninety'];
+  function twoDigits(n){
+    if(n < 20) return ones[n];
+    return tens[Math.floor(n/10)] + (n%10 ? ' ' + ones[n%10] : '');
+  }
+  function threeDigits(n){
+    return (n >= 100 ? ones[Math.floor(n/100)] + ' Hundred' + (n%100 ? ' ' : '') : '') + (n%100 ? twoDigits(n%100) : '');
+  }
+  let result = '';
+  const crore = Math.floor(num/10000000); num %= 10000000;
+  const lakh = Math.floor(num/100000); num %= 100000;
+  const thousand = Math.floor(num/1000); num %= 1000;
+  const hundred = num;
+  if(crore) result += threeDigits(crore) + ' Crore ';
+  if(lakh) result += twoDigits(lakh) + ' Lakh ';
+  if(thousand) result += twoDigits(thousand) + ' Thousand ';
+  if(hundred) result += threeDigits(hundred);
+  return result.trim();
+}
+
 // ---- Print / PDF export of a PO (opens a formatted print view; browser's
 // "Save as PDF" in the print dialog produces the actual PDF file) ----
 async function printPO(id){
   const { data: po, error } = await sb.from('purchase_orders').select('*, vendors(*)').eq('id', id).single();
   if(error){ toast('Could not load PO: '+error.message, true); return; }
   const c = state.company;
-  const v = po.vendors;
-  const itemRows = (po.items||[]).map((it,idx)=>`
-    <tr>
-      <td>${idx+1}</td>
-      <td>${it.description||''}</td>
+  const v = po.vendors || {};
+  const shipTo = po.delivery_address || c.address || '';
+  const totalTax = Number(po.tax_amount)||0;
+
+  const itemRows = (po.items||[]).map((it,idx)=>{
+    const taxable = it.taxable_amount!==undefined ? it.taxable_amount : (it.qty*it.unit_price);
+    const itemTax = it.tax_amount!==undefined ? it.tax_amount : taxable*(it.gst_rate||0)/100;
+    return `<tr>
+      <td style="text-align:center;">${idx+1}</td>
       <td>${it.hsn||'-'}</td>
-      <td style="text-align:right;">${it.qty}</td>
-      <td style="text-align:right;">${fmtMoney(it.unit_price)}</td>
-      <td style="text-align:right;">${it.gst_rate||0}%</td>
-      <td style="text-align:right;">${fmtMoney((it.taxable_amount!==undefined?it.taxable_amount:it.qty*it.unit_price))}</td>
-    </tr>`).join('');
-  let taxRows = '';
+      <td>${it.description||''}</td>
+      <td style="text-align:center;">${it.qty}</td>
+      <td style="text-align:center;">${it.uom||'EA'}</td>
+      <td style="text-align:center;">${it.rcm ? 'Yes' : 'No'}</td>
+      <td style="text-align:right;">${fmtMoney(taxable)}</td>
+      <td style="text-align:center;">${it.gst_rate||0}%</td>
+      <td style="text-align:right;">${fmtMoney(itemTax)}</td>
+      <td style="text-align:right;">${fmtMoney(taxable+itemTax)}</td>
+    </tr>`;
+  }).join('');
+
+  let taxSummary = '';
   if(po.tax_type === 'intrastate'){
-    taxRows = `<tr><td colspan="6" style="text-align:right;">CGST</td><td style="text-align:right;">${fmtMoney(po.cgst_amount)}</td></tr>
-               <tr><td colspan="6" style="text-align:right;">SGST</td><td style="text-align:right;">${fmtMoney(po.sgst_amount)}</td></tr>`;
+    taxSummary = `<tr><td colspan="9" style="text-align:right;">CGST</td><td style="text-align:right;">${fmtMoney(po.cgst_amount)}</td></tr>
+                  <tr><td colspan="9" style="text-align:right;">SGST</td><td style="text-align:right;">${fmtMoney(po.sgst_amount)}</td></tr>`;
   } else if(po.tax_type === 'interstate'){
-    taxRows = `<tr><td colspan="6" style="text-align:right;">IGST</td><td style="text-align:right;">${fmtMoney(po.igst_amount)}</td></tr>`;
+    taxSummary = `<tr><td colspan="9" style="text-align:right;">IGST</td><td style="text-align:right;">${fmtMoney(po.igst_amount)}</td></tr>`;
   } else {
-    taxRows = `<tr><td colspan="6" style="text-align:right;">GST</td><td style="text-align:right;">${fmtMoney(po.tax_amount)}</td></tr>`;
+    taxSummary = `<tr><td colspan="9" style="text-align:right;">GST</td><td style="text-align:right;">${fmtMoney(totalTax)}</td></tr>`;
   }
-  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${po.po_number}</title>
+
+  const termsBlock = (c.po_terms || DEFAULT_PO_TERMS);
+  const paymentTerms = c.po_payment_terms || 'Payment shall be made within sixty (60) days from the date of receipt of the invoice unless otherwise stated in the PO.';
+
+  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>PO ${po.po_number}</title>
   <style>
-    body{font-family:Arial,Helvetica,sans-serif;color:#111;padding:32px;font-size:13px;}
-    h1{font-size:20px;margin:0 0 4px;}
-    .muted{color:#666;font-size:12px;}
-    table{width:100%;border-collapse:collapse;margin-top:16px;}
-    th,td{border:1px solid #ccc;padding:6px 8px;font-size:12px;}
-    th{background:#f4f5f7;text-align:left;}
-    .grid{display:flex;justify-content:space-between;margin-top:20px;}
-    .box{width:48%;}
-    .box h3{font-size:12px;text-transform:uppercase;color:#666;margin-bottom:4px;}
-    .total-row td{font-weight:bold;}
+    @page { margin: 18mm 14mm; }
+    body{font-family:'Times New Roman',Georgia,serif;color:#000;font-size:12px;line-height:1.4;margin:0;}
+    .header{text-align:center;border-bottom:2px solid #000;padding-bottom:8px;margin-bottom:4px;}
+    .company-name{font-size:17px;font-weight:bold;margin-bottom:3px;}
+    .company-meta{font-size:10px;line-height:1.35;}
+    .po-title{text-align:center;font-size:15px;font-weight:bold;letter-spacing:1px;margin:10px 0;text-transform:uppercase;}
+    .parties{display:flex;justify-content:space-between;gap:12px;margin-bottom:10px;}
+    .party{width:49%;border:1px solid #000;padding:6px 8px;font-size:11px;}
+    .party h4{margin:0 0 4px;font-size:11px;text-transform:uppercase;border-bottom:1px solid #999;padding-bottom:2px;}
+    .po-meta-row{display:flex;justify-content:space-between;font-size:11px;margin-bottom:8px;}
+    table.items{width:100%;border-collapse:collapse;margin-top:6px;}
+    table.items th, table.items td{border:1px solid #000;padding:4px 5px;font-size:10.5px;}
+    table.items th{background:#e8e8e8;text-align:center;font-size:10px;}
+    .totals-label{font-weight:bold;}
+    .amount-words{margin-top:6px;font-size:11px;font-style:italic;border:1px solid #000;padding:5px 8px;}
+    .signatory{margin-top:30px;text-align:right;font-size:11px;}
+    .section-title{font-weight:bold;font-size:12px;margin:14px 0 4px;border-bottom:1px solid #000;}
+    .terms{font-size:9px;line-height:1.35;text-align:justify;white-space:pre-wrap;column-count:1;}
+    .page-break{page-break-before:always;}
+    .no-print{margin-top:20px;}
     @media print{ .no-print{display:none;} }
   </style></head><body>
-    <h1>Purchase Order</h1>
-    <p class="muted">PO Number: <strong>${po.po_number}</strong> &nbsp; | &nbsp; Date: ${fmtDate(po.created_at)} &nbsp; | &nbsp; Status: ${po.status}</p>
-    <div class="grid">
-      <div class="box">
-        <h3>From</h3>
-        <div><strong>${c.name}</strong></div>
-        <div>${c.address||''}</div>
-        <div>GSTIN: ${c.gstin||'—'}</div>
-        <div>${c.contact_email||''}</div>
-      </div>
-      <div class="box">
-        <h3>Vendor</h3>
-        <div><strong>${v?.name||''}</strong></div>
-        <div>${v?.address||''}</div>
-        <div>GSTIN: ${v?.gstin||'—'}</div>
-        <div>${v?.email||''}</div>
+
+    <div class="header">
+      <div class="company-name">${c.name||''}</div>
+      <div class="company-meta">
+        ${c.address ? `Office Address: ${c.address}<br>` : ''}
+        ${c.registered_office ? `Regd Office: ${c.registered_office}<br>` : ''}
+        ${[c.pan?`PAN: ${c.pan}`:'', c.cin?`CIN: ${c.cin}`:'', c.contact_phone?`Phone: ${c.contact_phone}`:'', c.fax?`Fax: ${c.fax}`:'', c.gstin?`GSTIN: ${c.gstin}`:''].filter(Boolean).join(' &nbsp; ')}
+        ${(c.contact_email||c.website) ? `<br>${[c.contact_email?`Email: ${c.contact_email}`:'', c.website?`Website: ${c.website}`:''].filter(Boolean).join(' &nbsp; ')}` : ''}
       </div>
     </div>
-    <table>
-      <tr><th>#</th><th>Description</th><th>HSN/SAC</th><th>Qty</th><th>Unit Price</th><th>GST%</th><th>Amount</th></tr>
+
+    <div class="po-title">Purchase Order</div>
+
+    <div class="parties">
+      <div class="party">
+        <h4>Supplier / Vendor</h4>
+        <strong>${v.name||''}</strong><br>
+        ${v.address||''}<br>
+        ${v.state?`State: ${v.state} `:''}${v.state_code?`(${v.state_code})`:''}<br>
+        ${v.gstin?`GSTIN: ${v.gstin}`:''} ${v.pan?`&nbsp; PAN: ${v.pan}`:''}<br>
+        ${v.email||''} ${v.phone?`&nbsp; ${v.phone}`:''}
+      </div>
+      <div class="party">
+        <h4>Bill To / Ship To</h4>
+        ${shipTo}<br>
+        ${c.gstin?`GSTIN: ${c.gstin}`:''}
+      </div>
+    </div>
+
+    <div class="po-meta-row">
+      <span><strong>PO No:</strong> ${po.po_number}</span>
+      <span><strong>Order Date:</strong> ${fmtDate(po.created_at)}</span>
+      <span><strong>Status:</strong> ${po.status}</span>
+      ${po.expected_delivery_date?`<span><strong>Expected Delivery:</strong> ${fmtDate(po.expected_delivery_date)}</span>`:''}
+    </div>
+
+    <p style="font-size:11px;margin:6px 0;">Please supply the following in accordance with the delivery instructions below — Amount in INR</p>
+
+    <table class="items">
+      <tr>
+        <th>S.No</th><th>HSN/SAC</th><th>Item Description</th><th>Qty</th><th>UOM</th><th>RCM</th>
+        <th>Taxable Value</th><th>Tax Rate</th><th>Tax Amt</th><th>Total</th>
+      </tr>
       ${itemRows}
-      <tr><td colspan="6" style="text-align:right;">Taxable amount</td><td style="text-align:right;">${fmtMoney(po.subtotal)}</td></tr>
-      ${taxRows}
-      <tr class="total-row"><td colspan="6" style="text-align:right;">Total</td><td style="text-align:right;">${fmtMoney(po.total_amount)}</td></tr>
+      <tr><td colspan="9" style="text-align:right;" class="totals-label">Taxable Amount</td><td style="text-align:right;">${fmtMoney(po.subtotal)}</td></tr>
+      ${taxSummary}
+      <tr><td colspan="9" style="text-align:right;" class="totals-label">Total Purchase Order Value</td><td style="text-align:right;" class="totals-label">${fmtMoney(po.total_amount)}</td></tr>
     </table>
-    ${po.notes ? `<p style="margin-top:16px;"><strong>Notes:</strong> ${po.notes}</p>` : ''}
-    ${po.expected_delivery_date ? `<p class="muted">Expected delivery: ${fmtDate(po.expected_delivery_date)}</p>` : ''}
-    <button class="no-print" onclick="window.print()" style="margin-top:24px;padding:10px 18px;">Print / Save as PDF</button>
+
+    <div class="amount-words">INR ${numberToWordsIndian(po.total_amount).toUpperCase()} ONLY</div>
+
+    ${po.notes ? `<p style="font-size:11px;margin-top:8px;"><strong>Notes:</strong> ${po.notes}</p>` : ''}
+
+    <div style="font-size:11px;margin-top:8px;"><strong>Payment Terms:</strong> ${paymentTerms}</div>
+
+    <div class="signatory">
+      For <strong>${c.name||''}</strong><br><br><br>
+      (${c.authorised_signatory || 'Authorised Signatory'})
+    </div>
+
+    <div class="page-break"></div>
+    <div class="section-title">Annexure — General Conditions of Purchase of Goods &amp; Services</div>
+    <div class="terms">${termsBlock.replace(/</g,'&lt;')}</div>
+
+    <button class="no-print" onclick="window.print()" style="padding:10px 18px;font-size:13px;">Print / Save as PDF</button>
     <scr`+`ipt>window.onload = () => window.print();</scr`+`ipt>
   </body></html>`;
   const w = window.open('', '_blank');
