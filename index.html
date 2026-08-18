@@ -489,6 +489,7 @@ async function renderCompanyApp(tab){
           <td>${badge(p.status)}</td><td class="muted">${fmtDate(p.created_at)}</td>
           <td class="row-actions">
             <button class="btn btn-sm" onclick="printPO('${p.id}')">Print / PDF</button>
+            <button class="btn btn-sm" onclick="emailPO('${p.id}')">Email</button>
             ${p.status==='pending_approval' ? `<button class="btn btn-sm" onclick='openPOApprovalModal(${JSON.stringify(p.id)})'>Review</button>` : ''}
             ${p.status==='draft' && !state.company.po_requires_approval ? `<button class="btn btn-sm btn-green" onclick="sendPO('${p.id}')">Send to vendor</button>`:''}
             ${p.status==='approved' ? `<button class="btn btn-sm btn-green" onclick="sendPO('${p.id}')">Send to vendor</button>`:''}
@@ -499,7 +500,7 @@ async function renderCompanyApp(tab){
   }
 
   else if(state.activeTab === 'invoices'){
-    const { data: invs, error: invErr } = await sb.from('invoices').select('*, vendors(name), purchase_orders(po_number)').eq('company_id',cid).order('submitted_at',{ascending:false});
+    const { data: invs, error: invErr } = await sb.from('invoices').select('*, vendors(name), purchase_orders(*)').eq('company_id',cid).order('submitted_at',{ascending:false});
     window.__invoicesForExport = invs || [];
     body += `<div class="card">
       <div style="display:flex;justify-content:space-between;align-items:center;">
@@ -508,15 +509,19 @@ async function renderCompanyApp(tab){
       </div>
       ${invErr ? `<p style="color:var(--red);">Couldn't load invoices: ${invErr.message}</p>` : ''}
       <table>
-        <tr><th>Invoice #</th><th>Vendor</th><th>PO</th><th>Amount</th><th>Status</th><th>Submitted</th><th></th></tr>
-        ${(invs||[]).map(i=>`<tr>
-          <td>${i.invoice_number}</td><td>${i.vendors?.name||''}</td><td>${i.purchase_orders?.po_number||''}</td>
-          <td>${fmtMoney(i.total_amount)}</td><td>${badge(i.status)}${i.status==='paid'&&i.payment_reference?`<div class="muted">Ref: ${i.payment_reference}</div>`:''}</td><td class="muted">${fmtDate(i.submitted_at)}</td>
+        <tr><th>Invoice #</th><th>Vendor</th><th>PO</th><th>Amount</th><th>PO Match</th><th>Status</th><th>Submitted</th><th></th></tr>
+        ${(invs||[]).map(i=>{
+          const m = matchInvoiceToPO(i, i.purchase_orders);
+          return `<tr>
+          <td>${i.invoice_number}</td><td>${i.vendors?.name||''}</td><td>${i.purchase_orders?.po_number||'—'}</td>
+          <td>${fmtMoney(i.total_amount)}</td>
+          <td>${matchBadge(m.status)}</td>
+          <td>${badge(i.status)}${i.status==='paid'&&i.payment_reference?`<div class="muted">Ref: ${i.payment_reference}</div>`:''}</td><td class="muted">${fmtDate(i.submitted_at)}</td>
           <td class="row-actions">
             <button class="btn btn-sm" onclick='openInvoiceModal(${JSON.stringify(i.id)})'>Review</button>
             ${isAdmin && i.status==='approved' ? `<button class="btn btn-sm btn-green" onclick='markInvoicePaid(${JSON.stringify(i.id)})'>Mark paid</button>` : ''}
           </td>
-        </tr>`).join('') || `<tr><td colspan="7" class="muted">${invErr ? '' : 'No invoices submitted yet.'}</td></tr>`}
+        </tr>`;}).join('') || `<tr><td colspan="8" class="muted">${invErr ? '' : 'No invoices submitted yet.'}</td></tr>`}
       </table>
     </div>`;
   }
@@ -754,19 +759,49 @@ function currentPOTaxSplit(){
 // This is an indicative lookup only — many HSN codes have exceptions/notifications
 // that override the chapter default, so the rate is always editable after lookup.
 const HSN_GST_TABLE = {
-  // common goods chapters (2-digit HSN chapter prefix)
-  '01':5,'02':5,'03':5,'04':5,'07':5,'08':5,'09':5,'10':0,'11':5,'12':5,'15':5,'16':12,'17':5,
-  '19':18,'20':12,'21':18,'22':18,'25':5,'27':18,'28':18,'29':18,'30':12,'32':18,'33':18,'34':18,
-  '38':18,'39':18,'40':18,'42':28,'44':12,'48':12,'49':12,'52':5,'54':5,'61':12,'62':12,'63':5,
-  '64':18,'69':18,'70':18,'71':3,'72':18,'73':18,'74':18,'76':18,'82':18,'83':18,'84':18,'85':18,
-  '87':28,'90':18,'94':18,'95':12,'96':18,
-  // common SAC (services) prefixes — 6-digit, matched by first 6 or first 4
-  '9954':18,'9963':12,'9965':18,'9966':18,'9971':18,'9972':18,'9973':18,'9983':18,'9985':18,
-  '9987':18,'9988':18,'9997':18,'998311':18,'998313':18,'998714':18
+  // ---- Goods: 2-digit HSN chapter defaults ----
+  '01':0,'02':0,'03':0,'04':5,'05':5,'06':5,'07':0,'08':0,'09':5,'10':0,'11':5,'12':5,'13':18,'14':5,
+  '15':5,'16':12,'17':5,'18':18,'19':18,'20':12,'21':18,'22':18,'23':5,'24':28,'25':5,'26':5,'27':18,
+  '28':18,'29':18,'30':12,'31':5,'32':18,'33':18,'34':18,'35':18,'36':18,'37':18,'38':18,'39':18,'40':18,
+  '41':5,'42':18,'43':18,'44':12,'45':18,'46':12,'47':12,'48':18,'49':12,'50':5,'51':5,'52':5,'53':5,
+  '54':12,'55':12,'56':12,'57':12,'58':12,'59':12,'60':12,'61':12,'62':12,'63':12,'64':18,'65':18,'66':12,
+  '67':18,'68':18,'69':18,'70':18,'71':3,'72':18,'73':18,'74':18,'75':18,'76':18,'78':18,'79':18,'80':18,
+  '81':18,'82':18,'83':18,'84':18,'85':18,'86':18,'87':28,'88':5,'89':5,'90':18,'91':18,'92':18,'93':18,
+  '94':18,'95':12,'96':18,'97':12,
+  // ---- Services: 4-digit SAC heading defaults ----
+  '9954':18, // construction services
+  '9961':18,'9962':18, // trade services
+  '9963':18, // accommodation, food & beverage (many 12/18 splits — default 18)
+  '9964':18, // passenger transport
+  '9965':18, // goods transport
+  '9966':18, // rental of transport vehicles
+  '9967':18, // supporting transport services
+  '9968':18, // postal & courier
+  '9969':18, // electricity/gas/water distribution
+  '9971':18, // financial & related services
+  '9972':18, // real estate services
+  '9973':18, // leasing/rental (non-transport)
+  '9981':18, // research & development
+  '9982':18, // legal & accounting services (incl. 998224 auditing/accounting)
+  '9983':18, // other professional, technical & business services
+  '9984':18, // telecom, broadcasting, information services
+  '9985':18, // support services
+  '9986':18, // agriculture/mining support
+  '9987':18, // maintenance, repair & installation
+  '9988':18, // manufacturing services (job work — many are 12; verify)
+  '9989':18, // other manufacturing/publishing/printing
+  '9991':18, // public admin services
+  '9992':18, // education services (many exempt — verify)
+  '9993':18, // human health & social care (many exempt — verify)
+  '9994':18, // sewage, waste, sanitation
+  '9995':18, // membership organisations
+  '9996':18, // recreational, cultural, sporting
+  '9997':18, // other services
+  '9998':18,'9999':18
 };
 function lookupGSTFromHSN(code){
   if(!code) return null;
-  const c = code.trim();
+  const c = code.trim().replace(/\s/g,'');
   if(HSN_GST_TABLE[c] !== undefined) return HSN_GST_TABLE[c];
   if(c.length>=6 && HSN_GST_TABLE[c.slice(0,6)] !== undefined) return HSN_GST_TABLE[c.slice(0,6)];
   if(c.length>=4 && HSN_GST_TABLE[c.slice(0,4)] !== undefined) return HSN_GST_TABLE[c.slice(0,4)];
@@ -776,8 +811,9 @@ function lookupGSTFromHSN(code){
 function onHSNInput(id){
   const hsn = document.getElementById(`po-item-hsn-${id}`)?.value;
   const rate = lookupGSTFromHSN(hsn);
-  if(rate !== null){
-    document.getElementById(`po-item-gst-${id}`).value = rate;
+  const gstField = document.getElementById(`po-item-gst-${id}`);
+  if(rate !== null && gstField){
+    gstField.value = rate;
   }
   recalcPOTotal();
 }
@@ -964,6 +1000,48 @@ async function sendPO(id){
   await sb.from('purchase_orders').update({status:'sent'}).eq('id', id);
   await logActivity(state.company.id, 'sent_po', 'purchase_order', id, {});
   toast('PO sent to vendor'); renderCompanyApp('pos');
+}
+
+// ---- Email a PO to the vendor ----
+// Opens a pre-filled email in the user's default mail app (mailto). The vendor's
+// email is the recipient; subject and body are auto-composed. The user attaches the
+// PDF (from the Print/PDF button) before sending. This needs no backend.
+async function emailPO(id){
+  const { data: po, error } = await sb.from('purchase_orders').select('*, vendors(name,email)').eq('id', id).single();
+  if(error){ toast('Could not load PO: '+error.message, true); return; }
+  const c = state.company;
+  const v = po.vendors || {};
+  showModal(`
+    <span class="close-x" onclick="closeModal()">✕</span>
+    <h3>Email PO ${po.po_number}</h3>
+    <label>To</label><input id="em-to" value="${v.email||''}"/>
+    <label style="margin-top:8px;display:block;">Subject</label>
+    <input id="em-subject" value="Purchase Order ${po.po_number} from ${c.name||''}"/>
+    <label style="margin-top:8px;display:block;">Body</label>
+    <textarea id="em-body" rows="10">Dear ${v.name||'Supplier'},
+
+Please find attached Purchase Order ${po.po_number} dated ${fmtDate(po.created_at)} for a total value of ${fmtMoney(po.total_amount)}.
+
+Kindly acknowledge receipt and confirm acceptance of this order as per the terms and conditions enclosed.${po.expected_delivery_date ? `\n\nExpected delivery date: ${fmtDate(po.expected_delivery_date)}.` : ''}
+
+For any queries, please reach out to us.
+
+Regards,
+${c.authorised_signatory || ''}
+${c.name||''}
+${c.contact_email||''} ${c.contact_phone?('· '+c.contact_phone):''}</textarea>
+    <p class="muted" style="margin-top:8px;">Tip: click "Print / PDF" first and save the PO, then attach it in your mail app after clicking below. The email opens in your default mail application.</p>
+    <div style="display:flex;gap:8px;margin-top:12px;">
+      <button class="btn" style="flex:1;" onclick="printPO('${id}')">Open PDF to attach</button>
+      <button class="btn btn-primary" style="flex:1;" onclick="launchMailto()">Open in email app</button>
+    </div>
+  `);
+}
+function launchMailto(){
+  const to = encodeURIComponent(document.getElementById('em-to').value);
+  const subject = encodeURIComponent(document.getElementById('em-subject').value);
+  const body = encodeURIComponent(document.getElementById('em-body').value);
+  window.location.href = `mailto:${to}?subject=${subject}&body=${body}`;
 }
 
 // Default general conditions printed on the PO annexure. Companies can override
@@ -1274,18 +1352,88 @@ async function createTeamUser(){
 }
 
 // ---- Invoice review / approval ----
+// ---- Invoice ↔ PO matching (3-way style check) ----
+// Compares the vendor's submitted invoice against the PO it's billed against and
+// returns a status of matched / partial / unmatched with human-readable reasons.
+function matchInvoiceToPO(inv, po){
+  const reasons = [];
+  if(!po){ return {status:'unmatched', reasons:['No linked purchase order found for this invoice.']}; }
+
+  // 1. Vendor must be the same
+  if(inv.vendor_id !== po.vendor_id){
+    reasons.push('Invoice vendor does not match the PO vendor.');
+  }
+
+  // 2. Amount comparison (allow ₹1 rounding tolerance)
+  const invTotal = Number(inv.total_amount)||0;
+  const poTotal = Number(po.total_amount)||0;
+  const diff = +(invTotal - poTotal).toFixed(2);
+  if(Math.abs(diff) <= 1){
+    // amounts align
+  } else if(invTotal < poTotal){
+    reasons.push(`Invoice total ${fmtMoney(invTotal)} is less than PO total ${fmtMoney(poTotal)} (short by ${fmtMoney(Math.abs(diff))}) — likely a partial/part-delivery invoice.`);
+  } else {
+    reasons.push(`Invoice total ${fmtMoney(invTotal)} exceeds PO total ${fmtMoney(poTotal)} (over by ${fmtMoney(diff)}).`);
+  }
+
+  // 3. Taxable/tax split comparison if available
+  if(inv.amount !== undefined && po.subtotal !== undefined){
+    const invBase = Number(inv.amount)||0, poBase = Number(po.subtotal)||0;
+    if(Math.abs(invBase - poBase) > 1){
+      reasons.push(`Taxable value differs: invoice ${fmtMoney(invBase)} vs PO ${fmtMoney(poBase)}.`);
+    }
+  }
+  if(inv.tax_amount !== undefined && po.tax_amount !== undefined){
+    const it = Number(inv.tax_amount)||0, pt = Number(po.tax_amount)||0;
+    if(Math.abs(it - pt) > 1){
+      reasons.push(`Tax amount differs: invoice ${fmtMoney(it)} vs PO ${fmtMoney(pt)}.`);
+    }
+  }
+
+  // Decide overall status
+  if(reasons.length === 0) return {status:'matched', reasons:['Invoice total, taxable value and tax match the PO.']};
+
+  const onlyAmountDiff = reasons.every(r => r.includes('less than') || r.includes('exceeds') || r.includes('Taxable value differs') || r.includes('Tax amount differs'));
+  const vendorMismatch = reasons.some(r => r.includes('vendor'));
+  if(vendorMismatch) return {status:'unmatched', reasons};
+  // amount differences → partial; big overage could be treated stricter but we flag as partial with reason
+  return {status: onlyAmountDiff ? 'partial' : 'unmatched', reasons};
+}
+function matchBadge(status){
+  const map = {matched:'badge-approved', partial:'badge-submitted', unmatched:'badge-rejected'};
+  const label = {matched:'MATCHED', partial:'PARTIALLY MATCHED', unmatched:'UNMATCHED'};
+  return `<span class="badge ${map[status]}">${label[status]}</span>`;
+}
+
 async function openInvoiceModal(id){
-  const { data: inv } = await sb.from('invoices').select('*, vendors(name,email), purchase_orders(po_number,total_amount)').eq('id',id).single();
+  const { data: inv } = await sb.from('invoices').select('*, vendors(name,email), purchase_orders(*)').eq('id',id).single();
   const { data: fileUrl } = await sb.storage.from('invoices').createSignedUrl(inv.file_path, 3600);
   const { data: history } = await sb.from('approvals').select('*, company_users(name,email)').eq('invoice_id', id).order('acted_at');
   const levels = state.company.approval_levels || 1;
   const canApprove = state.role === 'company_admin' || (state.role==='approver' && state.profile.approval_level === inv.current_approval_level);
+  const po = inv.purchase_orders;
+  const match = matchInvoiceToPO(inv, po);
 
   showModal(`
     <span class="close-x" onclick="closeModal()">✕</span>
     <h3>Invoice ${inv.invoice_number}</h3>
-    <p class="muted">Vendor: ${inv.vendors?.name} · PO: ${inv.purchase_orders?.po_number}</p>
+    <p class="muted">Vendor: ${inv.vendors?.name} · PO: ${po?.po_number || '—'}</p>
     <p>Amount: <strong>${fmtMoney(inv.total_amount)}</strong> &nbsp; Status: ${badge(inv.status)}</p>
+    <div style="border:1px solid var(--border);border-radius:8px;padding:10px;margin:10px 0;background:#fafafa;">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <strong style="font-size:13px;">PO Match</strong>
+        ${matchBadge(match.status)}
+      </div>
+      <table style="margin-top:8px;font-size:12px;">
+        <tr><th></th><th style="text-align:right;">Invoice</th><th style="text-align:right;">PO</th></tr>
+        <tr><td>Taxable</td><td style="text-align:right;">${fmtMoney(inv.amount)}</td><td style="text-align:right;">${po?fmtMoney(po.subtotal):'—'}</td></tr>
+        <tr><td>Tax</td><td style="text-align:right;">${fmtMoney(inv.tax_amount)}</td><td style="text-align:right;">${po?fmtMoney(po.tax_amount):'—'}</td></tr>
+        <tr><td>Total</td><td style="text-align:right;"><strong>${fmtMoney(inv.total_amount)}</strong></td><td style="text-align:right;"><strong>${po?fmtMoney(po.total_amount):'—'}</strong></td></tr>
+      </table>
+      <div style="margin-top:6px;font-size:12px;">
+        ${match.reasons.map(r=>`<div class="muted">• ${r}</div>`).join('')}
+      </div>
+    </div>
     <p>Approval progress: level ${inv.current_approval_level} of ${levels}</p>
     ${fileUrl?.signedUrl ? `<p><a href="${fileUrl.signedUrl}" target="_blank">View invoice file →</a></p>` : ''}
     <div style="margin-top:10px;">
@@ -1293,8 +1441,9 @@ async function openInvoiceModal(id){
       ${(history||[]).length ? history.map(h=>`<p class="muted">${badge(h.action)} by ${h.company_users?.name||h.company_users?.email} on ${fmtDate(h.acted_at)} ${h.comments?('— '+h.comments):''}</p>`).join('') : '<p class="muted">No actions yet.</p>'}
     </div>
     ${(canApprove && ['submitted','under_review'].includes(inv.status)) ? `
+      ${match.status !== 'matched' ? `<p style="color:var(--amber);font-size:12px;">⚠ This invoice is ${match.status === 'partial' ? 'partially matched' : 'unmatched'} against the PO — review the reasons above before approving.</p>` : ''}
       <label style="margin-top:10px;display:block;">Comments</label>
-      <textarea id="inv-comments" rows="2"></textarea>
+      <textarea id="inv-comments" rows="2">${match.status !== 'matched' ? '['+match.status.toUpperCase()+'] ' : ''}</textarea>
       <div style="display:flex;gap:8px;margin-top:10px;">
         <button class="btn btn-green" style="flex:1;" onclick="actOnInvoice('${id}','approved')">Approve</button>
         <button class="btn btn-danger" style="flex:1;" onclick="actOnInvoice('${id}','rejected')">Reject</button>
