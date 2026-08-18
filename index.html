@@ -56,10 +56,12 @@
   .muted{color:var(--muted);font-size:13px;}
   .stat{font-size:26px;font-weight:700;}
   .modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;z-index:50;}
-  .modal{background:#fff;border-radius:12px;padding:22px;width:460px;max-height:85vh;overflow:auto;}
+  .modal{background:#fff;border-radius:12px;padding:22px;width:460px;max-width:94vw;max-height:85vh;overflow:auto;}
+  .modal.wide{width:860px;}
   .close-x{float:right;cursor:pointer;color:var(--muted);}
   .toast{position:fixed;bottom:20px;right:20px;background:#1a1d24;color:#fff;padding:12px 18px;border-radius:8px;font-size:14px;z-index:100;}
   .item-row{display:grid;grid-template-columns:3fr 1fr 1fr 1fr auto;gap:6px;align-items:center;margin-bottom:6px;}
+  .item-row input{padding:7px 8px;font-size:13px;margin-top:0;min-width:0;}
   .hidden{display:none;}
   a{color:var(--primary);}
 </style>
@@ -787,7 +789,7 @@ function openNewPOModal(){
     <span class="close-x" onclick="closeModal()">✕</span>
     <h3>New Purchase Order</h3>
     <div id="po-form"></div>
-  `);
+  `, true);
   loadVendorsIntoPOForm();
 }
 async function loadVendorsIntoPOForm(){
@@ -811,10 +813,12 @@ async function loadVendorsIntoPOForm(){
       ${templates.map(t=>`<option value="${t.id}">${t.name}</option>`).join('')}
     </select>` : ''}
     <label style="margin-top:12px;display:block;">Items</label>
-    <div style="display:grid;grid-template-columns:2.2fr 1fr 0.8fr 1fr 0.8fr 1fr auto;gap:6px;font-size:11px;color:var(--muted);text-transform:uppercase;margin-bottom:2px;">
+    <div style="overflow-x:auto;">
+    <div style="display:grid;grid-template-columns:2.2fr 1.1fr 0.7fr 1fr 0.7fr 1.1fr 32px;gap:6px;font-size:11px;color:var(--muted);text-transform:uppercase;margin-bottom:2px;min-width:640px;">
       <span>Description</span><span>HSN/SAC</span><span>Qty</span><span>Unit price</span><span>GST %</span><span>Line total</span><span></span>
     </div>
-    <div id="po-items"></div>
+    <div id="po-items" style="min-width:640px;"></div>
+    </div>
     <button class="btn btn-sm" onclick="addPOItem()">+ Add item</button>
     <p class="muted" style="font-size:11px;margin-top:4px;">GST % auto-fills from HSN/SAC where recognized (indicative only) — always double-check and edit if needed.</p>
     <div style="text-align:right;margin-top:10px;font-size:13px;" id="po-tax-breakdown">
@@ -865,15 +869,15 @@ function addPOItem(){
   const div = document.createElement('div');
   div.className = 'item-row';
   div.id = `po-item-${id}`;
-  div.style.gridTemplateColumns = '2.2fr 1fr 0.8fr 1fr 0.8fr 1fr auto';
+  div.style.gridTemplateColumns = '2.2fr 1.1fr 0.7fr 1fr 0.7fr 1.1fr 32px';
   div.innerHTML = `
     <input placeholder="Description" oninput="recalcPOTotal()" id="po-item-desc-${id}"/>
     <input placeholder="HSN/SAC" oninput="onHSNInput(${id})" id="po-item-hsn-${id}"/>
     <input type="number" placeholder="Qty" value="1" oninput="recalcPOTotal()" id="po-item-qty-${id}"/>
-    <input type="number" placeholder="Unit price" oninput="recalcPOTotal()" id="po-item-price-${id}"/>
+    <input type="number" placeholder="Price" oninput="recalcPOTotal()" id="po-item-price-${id}"/>
     <input type="number" placeholder="GST%" oninput="recalcPOTotal()" id="po-item-gst-${id}"/>
-    <span id="po-item-amt-${id}" class="muted">₹0.00</span>
-    <button class="btn btn-sm btn-danger" onclick="document.getElementById('po-item-${id}').remove(); recalcPOTotal();">✕</button>
+    <span id="po-item-amt-${id}" class="muted" style="font-size:12px;align-self:center;">₹0.00</span>
+    <button class="btn btn-sm btn-danger" style="padding:4px 8px;" onclick="document.getElementById('po-item-${id}').remove(); recalcPOTotal();">✕</button>
   `;
   document.getElementById('po-items').appendChild(div);
 }
@@ -1404,11 +1408,11 @@ async function submitInvoice(poId){
 // ============================================================
 // MODAL HELPERS
 // ============================================================
-function showModal(innerHtml){
+function showModal(innerHtml, wide){
   const bg = document.createElement('div');
   bg.className = 'modal-bg';
   bg.id = 'active-modal-bg';
-  bg.innerHTML = `<div class="modal">${innerHtml}</div>`;
+  bg.innerHTML = `<div class="modal${wide?' wide':''}">${innerHtml}</div>`;
   document.body.appendChild(bg);
 }
 function closeModal(){
