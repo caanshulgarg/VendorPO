@@ -609,6 +609,7 @@ async function renderCompanyApp(tab){
         ${(vendors||[]).map(v=>`<tr>
           <td>${v.name}</td><td>${v.email}</td><td class="muted">${v.gstin||'-'}</td><td>${badge(v.status)}</td>
           <td class="row-actions">
+            <button class="btn btn-sm" onclick='openVendorDetail(${JSON.stringify(v.id)})'>View</button>
             ${v.status==='pending'?`<button class="btn btn-sm btn-green" onclick="setVendorStatus('${v.id}','active')">Activate</button>`:''}
             ${v.status==='active'?`<button class="btn btn-sm btn-danger" onclick="setVendorStatus('${v.id}','disabled')">Disable</button>`:''}
           </td>
@@ -827,6 +828,29 @@ function currentPOTaxSplit(){
 // Chapter-level HSN and common SAC prefixes mapped to the typical GST rate.
 // This is an indicative lookup only — many HSN codes have exceptions/notifications
 // that override the chapter default, so the rate is always editable after lookup.
+const HSN_GST_SPECIFIC = {
+  // Specific SAC/HSN codes whose GST rate differs from their chapter/heading default.
+  // Extend this list as you encounter codes that auto-fill wrongly.
+  // --- Services (SAC) commonly at 5% or 12% ---
+  '996511':5,  // road transport of goods (GTA) — 5% (without ITC) common case
+  '996512':5,  // railway transport of goods
+  '996531':5,  // air transport of goods
+  '996812':5,  // courier (some cases)
+  '996601':18, // rental of road vehicles
+  '9963':5,    // restaurant/food service — commonly 5% (non-AC/standalone); override heading 18
+  '996331':5,  // services provided by restaurants
+  '996332':18, // services by hotels with room tariff (varies)
+  '998714':18, // maintenance & repair of vehicles
+  // --- Goods (HSN) with specific rates ---
+  '040110':5,'040120':5, // milk
+  '100630':5,  // rice (branded/packaged)
+  '090111':5,  // coffee
+  '090240':5,  // tea
+  '170199':5,  // sugar
+  '300490':12, // medicaments
+  '481910':12, // cartons/boxes
+  '621520':12  // ties/apparel accessories
+};
 const HSN_GST_TABLE = {
   // ---- Goods: 2-digit HSN chapter defaults ----
   '01':0,'02':0,'03':0,'04':5,'05':5,'06':5,'07':0,'08':0,'09':5,'10':0,'11':5,'12':5,'13':18,'14':5,
@@ -871,6 +895,10 @@ const HSN_GST_TABLE = {
 function lookupGSTFromHSN(code){
   if(!code) return null;
   const c = code.trim().replace(/\s/g,'');
+  // 1. Exact specific-code overrides (most accurate) — checked first
+  if(HSN_GST_SPECIFIC[c] !== undefined) return HSN_GST_SPECIFIC[c];
+  if(c.length>=6 && HSN_GST_SPECIFIC[c.slice(0,6)] !== undefined) return HSN_GST_SPECIFIC[c.slice(0,6)];
+  // 2. Fall back to chapter/heading defaults (indicative)
   if(HSN_GST_TABLE[c] !== undefined) return HSN_GST_TABLE[c];
   if(c.length>=6 && HSN_GST_TABLE[c.slice(0,6)] !== undefined) return HSN_GST_TABLE[c.slice(0,6)];
   if(c.length>=4 && HSN_GST_TABLE[c.slice(0,4)] !== undefined) return HSN_GST_TABLE[c.slice(0,4)];
@@ -881,9 +909,18 @@ function onHSNInput(id){
   const hsn = document.getElementById(`po-item-hsn-${id}`)?.value;
   const rate = lookupGSTFromHSN(hsn);
   const gstField = document.getElementById(`po-item-gst-${id}`);
-  if(rate !== null && gstField){
+  // Only auto-fill if the user hasn't manually set/touched the GST field.
+  // Once the user edits GST themselves, we never overwrite it.
+  const touched = gstField?.dataset?.touched === '1';
+  if(rate !== null && gstField && !touched){
     gstField.value = rate;
+    gstField.dataset.autofilled = '1';
   }
+  recalcPOTotal();
+}
+function onGSTManualEdit(id){
+  const gstField = document.getElementById(`po-item-gst-${id}`);
+  if(gstField){ gstField.dataset.touched = '1'; gstField.dataset.autofilled = '0'; }
   recalcPOTotal();
 }
 
@@ -980,7 +1017,7 @@ function addPOItem(){
     <input placeholder="HSN/SAC" oninput="onHSNInput(${id})" id="po-item-hsn-${id}"/>
     <input type="number" placeholder="Qty" value="1" oninput="recalcPOTotal()" id="po-item-qty-${id}"/>
     <input type="number" placeholder="Price" oninput="recalcPOTotal()" id="po-item-price-${id}"/>
-    <input type="number" placeholder="GST%" oninput="recalcPOTotal()" id="po-item-gst-${id}"/>
+    <input type="number" placeholder="GST%" oninput="onGSTManualEdit(${id})" id="po-item-gst-${id}"/>
     <span id="po-item-amt-${id}" class="muted" style="font-size:12px;align-self:center;">₹0.00</span>
     <button class="btn btn-sm btn-danger" style="padding:4px 8px;" onclick="document.getElementById('po-item-${id}').remove(); recalcPOTotal();">✕</button>
   `;
@@ -1396,6 +1433,38 @@ async function createVendor(){
   await logActivity(state.company.id, 'added_vendor', 'vendor', data.id, {name});
   closeModal(); toast('Vendor added (pending)'); renderCompanyApp('vendors');
 }
+async function openVendorDetail(id){
+  const { data: v, error } = await sb.from('vendors').select('*').eq('id', id).single();
+  if(error){ toast(error.message, true); return; }
+  async function docLink(path, label){
+    if(!path) return `<div class="muted">${label}: not uploaded</div>`;
+    const { data } = await sb.storage.from('vendor-docs').createSignedUrl(path, 3600);
+    return `<div>${label}: ${data?.signedUrl ? `<a href="${data.signedUrl}" target="_blank">View →</a>` : 'uploaded'}</div>`;
+  }
+  const cheque = await docLink(v.cancelled_cheque_path, 'Cancelled cheque');
+  const gst = await docLink(v.gst_certificate_path, 'GST certificate');
+  const inc = await docLink(v.incorporation_cert_path, 'Incorporation certificate');
+  showModal(`
+    <span class="close-x" onclick="closeModal()">✕</span>
+    <h3>${v.name}</h3>
+    <p class="muted">${badge(v.status)}</p>
+    <table style="font-size:13px;">
+      <tr><td>Email</td><td>${v.email||'-'}</td></tr>
+      <tr><td>Phone</td><td>${v.phone||'-'}</td></tr>
+      <tr><td>GSTIN</td><td>${v.gstin||'-'}</td></tr>
+      <tr><td>PAN</td><td>${v.pan||'-'}</td></tr>
+      <tr><td>State</td><td>${v.state||'-'} ${v.state_code?`(${v.state_code})`:''}</td></tr>
+      <tr><td>Address</td><td>${v.address||'-'}</td></tr>
+      <tr><td>Bank</td><td>${v.bank_account_name||'-'} ${v.bank_account_number?('· '+v.bank_account_number):''} ${v.bank_ifsc?('· '+v.bank_ifsc):''}</td></tr>
+    </table>
+    <h4 style="margin:12px 0 6px;">Documents</h4>
+    ${cheque}${gst}${inc}
+    <div style="display:flex;gap:8px;margin-top:14px;">
+      ${v.status==='pending'?`<button class="btn btn-green" style="flex:1;" onclick="setVendorStatus('${v.id}','active'); closeModal();">Activate vendor</button>`:''}
+      ${v.status==='active'?`<button class="btn btn-danger" style="flex:1;" onclick="setVendorStatus('${v.id}','disabled'); closeModal();">Disable</button>`:''}
+    </div>
+  `);
+}
 async function setVendorStatus(id, status){
   await sb.from('vendors').update({status}).eq('id', id);
   await logActivity(state.company.id, 'vendor_status_'+status, 'vendor', id, {});
@@ -1561,21 +1630,140 @@ async function actOnInvoice(id, action){
 // ============================================================
 // VENDOR APP
 // ============================================================
+function renderVendorProfileForm(){
+  const v = state.profile;
+  return `<div class="card">
+    <h3 style="margin-top:0;">Business details</h3>
+    <div class="grid grid-2">
+      <div><label>Business name</label><input id="vp-name" value="${v.name||''}"/></div>
+      <div><label>Phone</label><input id="vp-phone" value="${v.phone||''}"/></div>
+      <div><label>GSTIN</label><input id="vp-gstin" value="${v.gstin||''}" placeholder="27ABCDE1234F1Z5"/></div>
+      <div><label>PAN</label><input id="vp-pan" value="${v.pan||''}"/></div>
+      <div><label>State</label><input id="vp-state" value="${v.state||''}"/></div>
+      <div><label>State code</label><input id="vp-statecode" value="${v.state_code||''}"/></div>
+    </div>
+    <label style="margin-top:8px;display:block;">Address</label><textarea id="vp-address" rows="2">${v.address||''}</textarea>
+    <h4 style="margin:14px 0 6px;">Bank details</h4>
+    <div class="grid grid-2">
+      <div><label>Account holder name</label><input id="vp-bankname" value="${v.bank_account_name||''}"/></div>
+      <div><label>Account number</label><input id="vp-bankacc" value="${v.bank_account_number||''}"/></div>
+      <div><label>IFSC</label><input id="vp-ifsc" value="${v.bank_ifsc||''}"/></div>
+    </div>
+    <button class="btn btn-primary" style="margin-top:12px;" onclick="saveVendorProfile()">Save details</button>
+    <p style="font-size:13px;color:var(--red);" id="vp-msg"></p>
+  </div>
+  <div class="card">
+    <h3 style="margin-top:0;">Documents (KYC)</h3>
+    <p class="muted">Upload PDF or image (JPG/PNG), max 50 MB each. Your client can view these to verify and activate you.</p>
+    <div class="grid grid-2" style="gap:14px;">
+      <div>
+        <label>Cancelled cheque</label>
+        <input type="file" id="vp-file-cheque" accept=".pdf,.jpg,.jpeg,.png"/>
+        <button class="btn btn-sm" style="margin-top:6px;" onclick="uploadVendorDoc('cheque')">Upload cheque</button>
+        <div id="vp-link-cheque" class="muted" style="margin-top:4px;">—</div>
+      </div>
+      <div>
+        <label>GST certificate</label>
+        <input type="file" id="vp-file-gst" accept=".pdf,.jpg,.jpeg,.png"/>
+        <button class="btn btn-sm" style="margin-top:6px;" onclick="uploadVendorDoc('gst')">Upload GST cert</button>
+        <div id="vp-link-gst" class="muted" style="margin-top:4px;">—</div>
+      </div>
+      <div>
+        <label>Incorporation certificate</label>
+        <input type="file" id="vp-file-inc" accept=".pdf,.jpg,.jpeg,.png"/>
+        <button class="btn btn-sm" style="margin-top:6px;" onclick="uploadVendorDoc('inc')">Upload incorporation cert</button>
+        <div id="vp-link-inc" class="muted" style="margin-top:4px;">—</div>
+      </div>
+    </div>
+    <p style="font-size:13px;" id="vp-doc-msg"></p>
+  </div>`;
+}
+async function saveVendorProfile(){
+  const msg = document.getElementById('vp-msg');
+  msg.style.color = 'var(--red)';
+  const gstin = document.getElementById('vp-gstin').value.trim().toUpperCase();
+  if(gstin && !/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z][Z][0-9A-Z]$/.test(gstin)){
+    msg.textContent = 'GSTIN format looks wrong (e.g. 27ABCDE1234F1Z5). Fix it or clear it.'; return;
+  }
+  const patch = {
+    name: document.getElementById('vp-name').value.trim(),
+    phone: document.getElementById('vp-phone').value.trim() || null,
+    gstin: gstin || null,
+    pan: document.getElementById('vp-pan').value.trim().toUpperCase() || null,
+    state: document.getElementById('vp-state').value.trim() || null,
+    state_code: document.getElementById('vp-statecode').value.trim() || null,
+    address: document.getElementById('vp-address').value.trim() || null,
+    bank_account_name: document.getElementById('vp-bankname').value.trim() || null,
+    bank_account_number: document.getElementById('vp-bankacc').value.trim() || null,
+    bank_ifsc: document.getElementById('vp-ifsc').value.trim().toUpperCase() || null
+  };
+  const { error } = await sb.from('vendors').update(patch).eq('id', state.profile.id);
+  if(error){ msg.textContent = error.message; return; }
+  state.profile = {...state.profile, ...patch};
+  toast('Profile saved');
+}
+async function uploadVendorDoc(kind){
+  const map = {
+    cheque: { input:'vp-file-cheque', col:'cancelled_cheque_path', label:'cheque' },
+    gst:    { input:'vp-file-gst',    col:'gst_certificate_path',   label:'GST certificate' },
+    inc:    { input:'vp-file-inc',    col:'incorporation_cert_path',label:'incorporation certificate' }
+  };
+  const cfg = map[kind];
+  const msg = document.getElementById('vp-doc-msg');
+  msg.style.color = 'var(--red)';
+  const file = document.getElementById(cfg.input).files[0];
+  if(!file){ msg.textContent = 'Choose a file first.'; return; }
+  if(file.size > 50*1024*1024){ msg.textContent = 'File exceeds 50 MB.'; return; }
+  const path = `${state.profile.id}/${kind}_${Date.now()}_${file.name}`;
+  const { error: upErr } = await sb.storage.from('vendor-docs').upload(path, file, { upsert:true });
+  if(upErr){ msg.textContent = 'Upload failed: '+upErr.message; return; }
+  const { error: dbErr } = await sb.from('vendors').update({ [cfg.col]: path }).eq('id', state.profile.id);
+  if(dbErr){ msg.textContent = 'Saved file but couldn\'t record it: '+dbErr.message; return; }
+  state.profile[cfg.col] = path;
+  msg.style.color = 'var(--green)';
+  msg.textContent = cfg.label.charAt(0).toUpperCase()+cfg.label.slice(1)+' uploaded.';
+  loadVendorDocLinks();
+}
+async function loadVendorDocLinks(){
+  const items = [
+    { col:'cancelled_cheque_path', el:'vp-link-cheque' },
+    { col:'gst_certificate_path',  el:'vp-link-gst' },
+    { col:'incorporation_cert_path', el:'vp-link-inc' }
+  ];
+  for(const it of items){
+    const el = document.getElementById(it.el);
+    if(!el) continue;
+    const p = state.profile[it.col];
+    if(!p){ el.textContent = 'Not uploaded'; continue; }
+    const { data } = await sb.storage.from('vendor-docs').createSignedUrl(p, 3600);
+    el.innerHTML = data?.signedUrl ? `<a href="${data.signedUrl}" target="_blank">View uploaded file →</a>` : 'Uploaded';
+  }
+}
+
 async function renderVendorApp(tab){
   state.activeTab = tab || state.activeTab || 'pos';
   const vid = state.profile.id;
+  const notActive = state.profile.status !== 'active';
 
-  if(state.profile.status !== 'active'){
-    document.getElementById('root').innerHTML = shell(state.company.name, `${state.profile.name} · Vendor`, `
-      <div class="card"><p>Your account is <strong>${state.profile.status}</strong>. You'll be able to view POs and submit invoices once the company activates your account.</p></div>
-    `);
+  let body = `<div class="tabs">
+    ${!notActive ? `<div class="tab ${state.activeTab==='pos'?'active':''}" onclick="renderVendorApp('pos')">My Purchase Orders</div>
+    <div class="tab ${state.activeTab==='invoices'?'active':''}" onclick="renderVendorApp('invoices')">My Invoices</div>` : ''}
+    <div class="tab ${state.activeTab==='profile'?'active':''}" onclick="renderVendorApp('profile')">My Profile &amp; Documents</div>
+  </div>`;
+
+  if(notActive && state.activeTab !== 'profile'){
+    body += `<div class="card"><p>Your account is <strong>${state.profile.status}</strong>. You'll be able to view POs and submit invoices once ${state.company.name} activates your account.</p>
+    <p class="muted">In the meantime, please complete your profile and upload your documents under "My Profile &amp; Documents" — it helps your client activate you faster.</p></div>`;
+    document.getElementById('root').innerHTML = shell(state.company.name, `${state.profile.name} · Vendor`, body);
     return;
   }
 
-  let body = `<div class="tabs">
-    <div class="tab ${state.activeTab==='pos'?'active':''}" onclick="renderVendorApp('pos')">My Purchase Orders</div>
-    <div class="tab ${state.activeTab==='invoices'?'active':''}" onclick="renderVendorApp('invoices')">My Invoices</div>
-  </div>`;
+  if(state.activeTab === 'profile'){
+    body += renderVendorProfileForm();
+    document.getElementById('root').innerHTML = shell(state.company.name, `${state.profile.name} · Vendor`, body);
+    loadVendorDocLinks();
+    return;
+  }
 
   if(state.activeTab === 'pos'){
     const { data: pos } = await sb.from('purchase_orders').select('*').eq('vendor_id',vid).in('status',['sent','acknowledged','closed']).order('created_at',{ascending:false});
