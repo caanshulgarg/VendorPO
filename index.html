@@ -183,6 +183,28 @@ async function boot(){
   }
 }
 
+// ---- Plan limits ----
+async function loadPlanLimits(){
+  const planName = (state.company.plan || 'trial').toLowerCase();
+  const { data } = await sb.from('plan_limits').select('*').eq('plan', planName).maybeSingle();
+  // fall back to a permissive default if the plan row is missing
+  state.plan = data || { plan: planName, max_users:null, max_vendors:null, max_docs_per_month:null, max_approval_levels:5, allow_partial_match:true, allow_custom_letterhead:true, allow_auto_email:false, price_monthly:0 };
+}
+function planAllowsMore(count, limit){
+  return limit === null || limit === undefined || count < limit;
+}
+async function countRows(table){
+  const { count } = await sb.from(table).select('id', {count:'exact', head:true}).eq('company_id', state.company.id);
+  return count || 0;
+}
+async function docsThisMonth(){
+  const start = new Date(); start.setDate(1); start.setHours(0,0,0,0);
+  const iso = start.toISOString();
+  const { count: poCount } = await sb.from('purchase_orders').select('id',{count:'exact',head:true}).eq('company_id', state.company.id).gte('created_at', iso);
+  const { count: invCount } = await sb.from('invoices').select('id',{count:'exact',head:true}).eq('company_id', state.company.id).gte('submitted_at', iso);
+  return (poCount||0) + (invCount||0);
+}
+
 async function resolveRole(){
   const uid = state.session.user.id;
   const errors = [];
@@ -193,7 +215,7 @@ async function resolveRole(){
 
   let { data: cu, error: cuErr } = await sb.from('company_users').select('*, companies(*)').eq('auth_user_id', uid).maybeSingle();
   if(cuErr) errors.push('company_users: '+cuErr.message);
-  if(cu){ state.role = cu.role; state.profile = cu; state.company = cu.companies; renderCompanyApp(); return; }
+  if(cu){ state.role = cu.role; state.profile = cu; state.company = cu.companies; await loadPlanLimits(); renderCompanyApp(); return; }
 
   let { data: v, error: vErr } = await sb.from('vendors').select('*, companies(*)').eq('auth_user_id', uid).maybeSingle();
   if(vErr) errors.push('vendors: '+vErr.message);
@@ -266,20 +288,43 @@ async function doSignIn(){
   await resolveRole();
 }
 async function doVendorSignup(){
-  const slug = document.getElementById('signup-slug').value.trim();
+  const slug = document.getElementById('signup-slug').value.trim().toLowerCase();
   const name = document.getElementById('signup-name').value.trim();
   const email = document.getElementById('signup-email').value.trim();
   const password = document.getElementById('signup-pass').value;
   const msg = document.getElementById('signup-msg');
-  const { data: company, error: cerr } = await sb.from('companies').select('id,status').eq('slug', slug).maybeSingle();
-  if(cerr || !company){ msg.textContent = 'Company not found — check the invite code.'; return; }
-  const { data: sdata, error: serr } = await sb.auth.signUp({ email, password });
+  msg.style.color = 'var(--red)';
+  msg.textContent = '';
+
+  if(!slug || !name || !email || !password){ msg.textContent = 'All fields are required.'; return; }
+  if(password.length < 6){ msg.textContent = 'Password must be at least 6 characters.'; return; }
+
+  // 1. Find the company by slug (works while logged out, via SECURITY DEFINER function)
+  const { data: companies, error: cerr } = await sb.rpc('find_company_by_slug', { p_slug: slug });
+  const company = Array.isArray(companies) ? companies[0] : companies;
+  if(cerr){ msg.textContent = 'Lookup failed: '+cerr.message; return; }
+  if(!company){ msg.textContent = 'No company found with code "'+slug+'". Check the exact code your client gave you.'; return; }
+  if(company.status !== 'active'){ msg.textContent = 'That company account is currently suspended — contact them.'; return; }
+
+  // 2. Create the auth account (isolated client so it doesn't disturb any current session)
+  const { data: sdata, error: serr } = await scratchClient().auth.signUp({ email, password });
   if(serr){ msg.textContent = serr.message; return; }
-  const { error: verr } = await sb.from('vendors').insert({
-    company_id: company.id, auth_user_id: sdata.user.id, name, email, status: 'pending'
+  if(!sdata.user){ msg.textContent = 'Signup failed — please try again.'; return; }
+
+  // 3. Sign in as the new vendor so the claim runs under their identity
+  const { error: sierr } = await sb.auth.signInWithPassword({ email, password });
+  if(sierr){ msg.textContent = 'Account created. Please confirm your email if required, then sign in.'; return; }
+
+  // 4. Claim the pre-created vendor row (or create a fresh one) via SECURITY DEFINER function
+  const { error: claimErr } = await sb.rpc('claim_vendor_row', {
+    p_company_id: company.id, p_email: email, p_auth_user_id: sdata.user.id, p_name: name
   });
-  if(verr){ msg.textContent = verr.message; return; }
-  msg.textContent = 'Account created. Waiting for company approval — check email to confirm your address.';
+  if(claimErr){ msg.textContent = 'Linked account failed: '+claimErr.message; return; }
+
+  msg.style.color = 'var(--green)';
+  msg.textContent = 'Account created and linked to '+company.name+'. Loading…';
+  state.session = (await sb.auth.getSession()).data.session;
+  await resolveRole();
 }
 
 // ============================================================
@@ -430,7 +475,11 @@ async function openCompanyDetail(id){
     <p class="muted" style="margin-top:10px;">Invoices: ${(invs||[]).length} total ·
       ${(invs||[]).filter(i=>i.status==='approved').length} approved ·
       ${(invs||[]).filter(i=>['submitted','under_review'].includes(i.status)).length} pending</p>
-    <label style="margin-top:10px;display:block;">Approval levels (invoices, and POs if PO approval is on)</label>
+    <label style="margin-top:10px;display:block;">Plan</label>
+    <select id="cd-plan">
+      ${['trial','basic','professional','advanced'].map(p=>`<option value="${p}" ${c.plan===p?'selected':''}>${p.charAt(0).toUpperCase()+p.slice(1)}</option>`).join('')}
+    </select>
+    <label style="margin-top:8px;display:block;">Approval levels (invoices, and POs if PO approval is on)</label>
     <input id="cd-levels" type="number" value="${c.approval_levels}" min="1" max="5"/>
     <label style="margin-top:8px;display:block;">Annual budget (optional)</label>
     <input id="cd-budget" type="number" value="${c.annual_budget||''}"/>
@@ -440,7 +489,8 @@ async function openCompanyDetail(id){
 async function updateApprovalLevels(id){
   const v = parseInt(document.getElementById('cd-levels').value)||1;
   const budget = document.getElementById('cd-budget').value ? parseFloat(document.getElementById('cd-budget').value) : null;
-  await sb.from('companies').update({approval_levels:v, annual_budget: budget}).eq('id',id);
+  const plan = document.getElementById('cd-plan').value;
+  await sb.from('companies').update({approval_levels:v, annual_budget: budget, plan}).eq('id',id);
   toast('Updated');
   closeModal();
   renderSuperadmin('companies');
@@ -464,10 +514,26 @@ async function renderCompanyApp(tab){
     const { data: pos } = await sb.from('purchase_orders').select('id,status').eq('company_id',cid);
     const { data: invs } = await sb.from('invoices').select('id,status,total_amount').eq('company_id',cid);
     const pending = (invs||[]).filter(i=>['submitted','under_review'].includes(i.status));
+    const p = state.plan || {};
+    const vCount = await countRows('vendors');
+    const uCount = await countRows('company_users');
+    const dCount = await docsThisMonth();
+    const cap = (used, max) => max === null || max === undefined ? `${used} / ∞` : `${used} / ${max}`;
     body += `<div class="grid grid-3">
       <div class="card"><div class="stat">${(pos||[]).length}</div><div class="muted">Purchase orders</div></div>
       <div class="card"><div class="stat">${pending.length}</div><div class="muted">Invoices pending approval</div></div>
       <div class="card"><div class="stat">${fmtMoney((invs||[]).filter(i=>i.status==='approved').reduce((s,i)=>s+Number(i.total_amount),0))}</div><div class="muted">Approved (total value)</div></div>
+    </div>
+    <div class="card" style="margin-top:4px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <h3 style="margin:0;">Plan: ${(state.company.plan||'trial').replace(/^./,c=>c.toUpperCase())}</h3>
+        ${p.price_monthly ? `<span class="muted">₹${p.price_monthly}/mo + GST</span>` : '<span class="badge badge-submitted">Trial</span>'}
+      </div>
+      <div class="grid grid-3" style="margin-top:10px;">
+        <div><div class="muted">Team users</div><strong>${cap(uCount, p.max_users)}</strong></div>
+        <div><div class="muted">Vendors</div><strong>${cap(vCount, p.max_vendors)}</strong></div>
+        <div><div class="muted">Docs this month</div><strong>${cap(dCount, p.max_docs_per_month)}</strong></div>
+      </div>
     </div>`;
   }
 
@@ -533,7 +599,10 @@ async function renderCompanyApp(tab){
         <h3 style="margin:0;">Vendors</h3>
         <button class="btn btn-primary" onclick="openNewVendorModal()">+ Add vendor</button>
       </div>
-      <p class="muted">Or share your signup link: <code>yoursite.com/#/signup?slug=${state.company.slug}</code></p>
+      <div style="background:#f0f6ff;border:1px solid #cfe0ff;border-radius:8px;padding:10px;margin:8px 0;font-size:13px;">
+        <strong>Vendor self-signup code:</strong> <code style="font-size:14px;background:#fff;padding:2px 8px;border-radius:4px;">${state.company.slug}</code>
+        <div class="muted" style="margin-top:4px;">Share this code with your vendors. They open the app → "Vendor sign up" tab → enter this exact code, their business name, email and a password. They'll appear here as "pending" for you to activate. Tip: if you add a vendor below with their email first, their signup automatically links to that row instead of creating a duplicate.</div>
+      </div>
       ${vendErr ? `<p style="color:var(--red);">Couldn't load vendors: ${vendErr.message}</p>` : ''}
       <table>
         <tr><th>Name</th><th>Email</th><th>GSTIN</th><th>Status</th><th></th></tr>
@@ -972,6 +1041,12 @@ async function createPO(){
   if(!vendor_id){ msg.textContent = 'Select a vendor — if none are listed, add an active vendor first from the Vendors tab.'; return; }
   if(items.length===0){ msg.textContent = 'Add at least one item.'; return; }
 
+  const docCount = await docsThisMonth();
+  if(!planAllowsMore(docCount, state.plan?.max_docs_per_month)){
+    msg.textContent = `Your ${state.plan.plan} plan allows ${state.plan.max_docs_per_month} POs+invoices per month (used ${docCount}). Upgrade for more.`;
+    return;
+  }
+
   btn.disabled = true; btn.textContent = 'Creating…';
   try{
     const initialStatus = state.company.po_requires_approval ? 'pending_approval' : 'draft';
@@ -1309,6 +1384,11 @@ async function createVendor(){
     msg.textContent = 'That GSTIN doesn\'t match the standard 15-character format (e.g. 27ABCDE1234F1Z5) — double-check it, or leave it blank if unknown.';
     return;
   }
+  const vCount = await countRows('vendors');
+  if(!planAllowsMore(vCount, state.plan?.max_vendors)){
+    msg.textContent = `Your ${state.plan.plan} plan allows up to ${state.plan.max_vendors} vendors. Upgrade to add more.`;
+    return;
+  }
   const { data, error } = await sb.from('vendors').insert({
     company_id: state.company.id, name, email, phone, gstin, status:'pending'
   }).select().single();
@@ -1342,6 +1422,11 @@ async function createTeamUser(){
   const role = document.getElementById('nu-role').value;
   const approval_level = parseInt(document.getElementById('nu-level').value)||1;
   const msg = document.getElementById('nu-msg');
+  const uCount = await countRows('company_users');
+  if(!planAllowsMore(uCount, state.plan?.max_users)){
+    msg.textContent = `Your ${state.plan.plan} plan allows up to ${state.plan.max_users} team users. Upgrade to add more.`;
+    return;
+  }
   const { data: sdata, error: serr } = await scratchClient().auth.signUp({ email, password });
   if(serr){ msg.textContent = serr.message; return; }
   const { error } = await sb.from('company_users').insert({
