@@ -1799,10 +1799,14 @@ async function confirmPayment(id){
 function openGst2bQuickMenu(ev, id, current){
   ev.stopPropagation();
   document.querySelectorAll('.row-menu').forEach(m=>m.remove());
+  // Read the CURRENT status live from the row's data attribute, so the ✓ always
+  // reflects the latest value even if something changed since render.
+  const rowEl = ev.currentTarget.closest('tr');
+  const liveCurrent = (rowEl && rowEl.getAttribute('data-gst2b')) || current || 'pending';
   const menu = document.createElement('div');
   menu.className = 'row-menu';
   const opt = (val, label, cls)=>`<button onclick='setGst2bQuick(${JSON.stringify(id)},"${val}")'>
-      <span class="badge ${cls}" style="pointer-events:none;">${label}</span>${current===val?' ✓':''}
+      <span class="badge ${cls}" style="pointer-events:none;">${label}</span>${liveCurrent===val?' <strong style="color:var(--primary);">✓</strong>':''}
     </button>`;
   menu.innerHTML =
     opt('pending','Not yet checked','badge-pending2b') +
@@ -1821,7 +1825,11 @@ async function setGst2bQuick(id, status){
   if(error){ toast(error.message, true); return; }
   await logActivity(state.company.id, 'gstr2b_updated', 'invoice', id, {status, inline:true});
   const label = status==='reflected'?'Matched (in 2B)':status==='not_reflected'?'Unmatched':'Not yet checked';
-  toast(`GSTR-2B set: ${label}`); renderCompanyApp('invoices');
+  toast(`GSTR-2B set: ${label}`);
+  // Re-render so the change propagates everywhere that reads this status:
+  // the badge, the filter attribute, the GST/ITC hold column, the dashboard
+  // KPIs, payables and reports all re-read from the single source of truth.
+  renderCompanyApp('invoices');
 }
 
 async function openGstr2bModal(id){
