@@ -6,64 +6,160 @@
 <title>POFlow — PO & Vendor Invoice Management</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
+  /* ============================================================
+     POFlow — "Modern Ledger" design system
+     Deep ink navy + accountant's green, tabular numerals,
+     disciplined hairline structure. Built for finance/procurement
+     users who value precision and trust over flash.
+     ============================================================ */
+  @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&display=swap');
   :root{
-    --bg:#f4f5f7; --card:#ffffff; --border:#e2e4e9; --text:#1a1d24; --muted:#6b7280;
-    --primary:#2563eb; --primary-dark:#1d4ed8; --green:#16a34a; --red:#dc2626; --amber:#d97706;
-    --radius:10px;
+    --bg:#f0f1ec;            /* warm paper-grey, like ledger stock */
+    --card:#ffffff;
+    --border:#e0e2da;
+    --border-strong:#c9ccc0;
+    --ink:#16202e;           /* deep ink navy — primary text & chrome */
+    --ink-soft:#5a6472;
+    --text:#16202e;
+    --muted:#6b7280;
+    --primary:#0f6f5c;       /* accountant's green (ledger credit) */
+    --primary-dark:#0c5a4a;
+    --primary-soft:#e4f0ec;
+    --green:#0f6f5c;
+    --red:#b23b3b;
+    --amber:#b8893a;         /* muted brass */
+    --blue:#3b5b9b;
+    --radius:12px;
+    --shadow:0 1px 2px rgba(22,32,46,0.04), 0 8px 24px -16px rgba(22,32,46,0.18);
+    --num:'Inter';
   }
   *{box-sizing:border-box;}
-  body{margin:0;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--text);}
-  .app{max-width:1200px;margin:0 auto;padding:20px;}
-  header.topbar{display:flex;justify-content:space-between;align-items:center;padding:14px 20px;background:var(--card);border-bottom:1px solid var(--border);}
-  header.topbar h1{font-size:18px;margin:0;}
-  header.topbar .who{font-size:13px;color:var(--muted);}
-  .btn{padding:8px 14px;border-radius:8px;border:1px solid var(--border);background:var(--card);cursor:pointer;font-size:14px;}
-  .btn-primary{background:var(--primary);color:#fff;border:none;}
-  .btn-primary:hover{background:var(--primary-dark);}
-  .btn-danger{background:var(--red);color:#fff;border:none;}
-  .btn-green{background:var(--green);color:#fff;border:none;}
-  .btn-sm{padding:5px 10px;font-size:12px;}
-  .card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:18px;margin-bottom:16px;}
-  .grid{display:grid;gap:16px;}
+  body{margin:0;font-family:'Inter',-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--text);-webkit-font-smoothing:antialiased;font-feature-settings:'tnum' 1,'cv05' 1;}
+  .app{max-width:1220px;margin:0 auto;padding:26px 24px 60px;}
+
+  /* top chrome */
+  header.topbar{display:flex;justify-content:space-between;align-items:center;padding:0 26px;height:60px;background:var(--ink);color:#fff;position:sticky;top:0;z-index:30;}
+  header.topbar h1{font-family:'Fraunces',serif;font-size:19px;font-weight:600;margin:0;letter-spacing:-0.01em;color:#fff;}
+  header.topbar h1 .mark{color:#5cc9a7;}
+  header.topbar .who{font-size:12.5px;color:#aeb8c4;letter-spacing:0.01em;}
+  header.topbar .btn{background:rgba(255,255,255,0.08);color:#fff;border:1px solid rgba(255,255,255,0.16);}
+  header.topbar .btn:hover{background:rgba(255,255,255,0.16);}
+
+  /* buttons */
+  .btn{padding:9px 15px;border-radius:9px;border:1px solid var(--border-strong);background:var(--card);cursor:pointer;font-size:13.5px;font-weight:500;font-family:inherit;color:var(--ink);transition:all .14s ease;line-height:1.1;}
+  .btn:hover{border-color:var(--ink-soft);background:#fafbf9;}
+  .btn-primary{background:var(--primary);color:#fff;border:1px solid var(--primary);}
+  .btn-primary:hover{background:var(--primary-dark);border-color:var(--primary-dark);}
+  .btn-danger{background:#fff;color:var(--red);border:1px solid #e4c4c4;}
+  .btn-danger:hover{background:#fbf1f1;border-color:var(--red);}
+  .btn-green{background:var(--primary);color:#fff;border:1px solid var(--primary);}
+  .btn-green:hover{background:var(--primary-dark);}
+  .btn-sm{padding:5px 11px;font-size:12px;border-radius:7px;}
+
+  /* cards */
+  .card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:22px;margin-bottom:18px;box-shadow:var(--shadow);}
+  .card h3{font-family:'Fraunces',serif;font-weight:600;font-size:17px;letter-spacing:-0.01em;}
+  .grid{display:grid;gap:18px;}
   .grid-2{grid-template-columns:1fr 1fr;}
-  .grid-3{grid-template-columns:1fr 1fr 1fr;}
-  input,select,textarea{width:100%;padding:9px 10px;border:1px solid var(--border);border-radius:7px;font-size:14px;margin-top:4px;background:#fff;}
-  label{font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.02em;}
-  table{width:100%;border-collapse:collapse;font-size:14px;}
-  th,td{text-align:left;padding:9px 8px;border-bottom:1px solid var(--border);}
-  th{color:var(--muted);font-size:12px;text-transform:uppercase;}
-  .badge{padding:3px 9px;border-radius:20px;font-size:11px;font-weight:600;display:inline-block;}
-  .badge-draft{background:#e5e7eb;color:#374151;}
-  .badge-sent{background:#dbeafe;color:#1d4ed8;}
-  .badge-pending_approval{background:#fef3c7;color:#92400e;}
-  .badge-acknowledged{background:#dbeafe;color:#1d4ed8;}
-  .badge-closed{background:#e5e7eb;color:#374151;}
-  .badge-cancelled{background:#fee2e2;color:#b91c1c;}
-  .badge-submitted{background:#fef3c7;color:#92400e;}
-  .badge-under_review{background:#fef3c7;color:#92400e;}
-  .badge-approved{background:#dcfce7;color:#15803d;}
-  .badge-rejected{background:#fee2e2;color:#b91c1c;}
-  .badge-paid{background:#e0e7ff;color:#3730a3;}
-  .badge-active{background:#dcfce7;color:#15803d;}
-  .badge-pending{background:#fef3c7;color:#92400e;}
-  .badge-disabled,.badge-suspended{background:#fee2e2;color:#b91c1c;}
-  .tabs{display:flex;gap:4px;margin-bottom:16px;border-bottom:1px solid var(--border);}
-  .tab{padding:10px 16px;cursor:pointer;font-size:14px;color:var(--muted);border-bottom:2px solid transparent;}
+  .grid-3{grid-template-columns:repeat(3,1fr);}
+  .grid-4{grid-template-columns:repeat(4,1fr);}
+
+  /* forms */
+  input,select,textarea{width:100%;padding:10px 11px;border:1px solid var(--border-strong);border-radius:8px;font-size:14px;margin-top:5px;background:#fff;font-family:inherit;color:var(--ink);transition:border-color .14s,box-shadow .14s;}
+  input:focus,select:focus,textarea:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 3px var(--primary-soft);}
+  label{font-size:11px;color:var(--ink-soft);font-weight:600;text-transform:uppercase;letter-spacing:.05em;}
+
+  /* tables */
+  table{width:100%;border-collapse:collapse;font-size:13.5px;}
+  th,td{text-align:left;padding:11px 10px;border-bottom:1px solid var(--border);}
+  th{color:var(--ink-soft);font-size:11px;text-transform:uppercase;letter-spacing:.05em;font-weight:600;}
+  tbody tr{transition:background .12s;}
+  tbody tr:hover{background:#fafbf8;}
+
+  /* badges */
+  .badge{padding:3px 10px;border-radius:6px;font-size:10.5px;font-weight:600;display:inline-block;letter-spacing:.03em;text-transform:uppercase;border:1px solid transparent;}
+  .badge-draft{background:#eceee9;color:#5a6472;}
+  .badge-sent{background:#e8eef8;color:#3b5b9b;}
+  .badge-pending_approval{background:#f7efe0;color:#8a6420;}
+  .badge-acknowledged{background:#e8eef8;color:#3b5b9b;}
+  .badge-closed{background:#eceee9;color:#5a6472;}
+  .badge-cancelled{background:#f8eded;color:#a33;}
+  .badge-submitted{background:#f7efe0;color:#8a6420;}
+  .badge-under_review{background:#f7efe0;color:#8a6420;}
+  .badge-approved{background:#e2efea;color:#0f6f5c;}
+  .badge-rejected{background:#f8eded;color:#a33;}
+  .badge-paid{background:#e8eef8;color:#2f4a80;}
+  .badge-active{background:#e2efea;color:#0f6f5c;}
+  .badge-pending{background:#f7efe0;color:#8a6420;}
+  .badge-disabled,.badge-suspended{background:#f8eded;color:#a33;}
+
+  /* tabs */
+  .tabs{display:flex;gap:2px;margin-bottom:22px;border-bottom:1px solid var(--border);}
+  .tab{padding:11px 17px;cursor:pointer;font-size:13.5px;font-weight:500;color:var(--ink-soft);border-bottom:2px solid transparent;margin-bottom:-1px;transition:color .14s;}
+  .tab:hover{color:var(--ink);}
   .tab.active{color:var(--primary);border-bottom-color:var(--primary);font-weight:600;}
-  .login-wrap{display:flex;align-items:center;justify-content:center;min-height:100vh;}
-  .login-card{width:360px;}
-  .row-actions{display:flex;gap:6px;}
+
+  /* login */
+  .login-wrap{display:flex;align-items:center;justify-content:center;min-height:100vh;background:linear-gradient(160deg,#16202e 0%,#1d3040 55%,#12433a 100%);padding:20px;}
+  .login-card{width:390px;box-shadow:0 24px 60px -20px rgba(0,0,0,0.5);}
+  .login-card h2{font-family:'Fraunces',serif;font-weight:700;font-size:26px;letter-spacing:-0.02em;}
+  .brand-lockup{display:flex;align-items:baseline;gap:2px;}
+
+  /* stats / KPI */
+  .row-actions{display:flex;gap:6px;flex-wrap:wrap;}
   .muted{color:var(--muted);font-size:13px;}
-  .stat{font-size:26px;font-weight:700;}
-  .modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;z-index:50;}
-  .modal{background:#fff;border-radius:12px;padding:22px;width:460px;max-width:94vw;max-height:85vh;overflow:auto;}
-  .modal.wide{width:860px;}
-  .close-x{float:right;cursor:pointer;color:var(--muted);}
-  .toast{position:fixed;bottom:20px;right:20px;background:#1a1d24;color:#fff;padding:12px 18px;border-radius:8px;font-size:14px;z-index:100;}
+  .stat{font-size:30px;font-weight:700;letter-spacing:-0.02em;font-variant-numeric:tabular-nums;font-family:'Fraunces',serif;color:var(--ink);line-height:1.1;}
+  .kpi{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:18px 20px;box-shadow:var(--shadow);position:relative;overflow:hidden;}
+  .kpi .kpi-label{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-soft);font-weight:600;margin-bottom:8px;}
+  .kpi .kpi-value{font-size:28px;font-weight:700;font-family:'Fraunces',serif;letter-spacing:-0.02em;color:var(--ink);font-variant-numeric:tabular-nums;line-height:1;}
+  .kpi .kpi-sub{font-size:12px;color:var(--ink-soft);margin-top:6px;}
+  .kpi .kpi-accent{position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--primary);}
+  .kpi.amber .kpi-accent{background:var(--amber);}
+  .kpi.blue .kpi-accent{background:var(--blue);}
+  .kpi.red .kpi-accent{background:var(--red);}
+
+  /* modal */
+  .modal-bg{position:fixed;inset:0;background:rgba(16,24,34,0.55);backdrop-filter:blur(2px);display:flex;align-items:center;justify-content:center;z-index:50;padding:20px;}
+  .modal{background:#fff;border-radius:14px;padding:26px;width:460px;max-width:94vw;max-height:88vh;overflow:auto;box-shadow:0 30px 80px -20px rgba(0,0,0,0.5);}
+  .modal.wide{width:880px;}
+  .modal h3{font-family:'Fraunces',serif;font-weight:600;font-size:20px;letter-spacing:-0.01em;margin-top:0;}
+  .close-x{float:right;cursor:pointer;color:var(--ink-soft);font-size:16px;line-height:1;}
+  .close-x:hover{color:var(--ink);}
+
+  /* toast */
+  .toast{position:fixed;bottom:22px;right:22px;background:var(--ink);color:#fff;padding:13px 20px;border-radius:10px;font-size:14px;z-index:100;box-shadow:0 12px 32px -8px rgba(0,0,0,0.4);animation:toastIn .2s ease;}
+  @keyframes toastIn{from{opacity:0;transform:translateY(8px);}to{opacity:1;transform:translateY(0);}}
+
+  /* PO item rows */
   .item-row{display:grid;grid-template-columns:3fr 1fr 1fr 1fr auto;gap:6px;align-items:center;margin-bottom:6px;}
-  .item-row input{padding:7px 8px;font-size:13px;margin-top:0;min-width:0;}
+  .item-row input{padding:8px;font-size:13px;margin-top:0;min-width:0;}
+
+  /* simple bar chart (analytics) */
+  .barchart{display:flex;align-items:flex-end;gap:10px;height:180px;padding-top:10px;}
+  .barchart .bar-col{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;gap:6px;}
+  .barchart .bar{width:100%;max-width:46px;background:linear-gradient(180deg,#159e83,#0f6f5c);border-radius:5px 5px 0 0;min-height:2px;transition:height .5s cubic-bezier(.2,.8,.2,1);}
+  .barchart .bar-label{font-size:10.5px;color:var(--ink-soft);text-align:center;font-weight:500;}
+  .barchart .bar-val{font-size:11px;font-weight:600;color:var(--ink);font-variant-numeric:tabular-nums;}
+
+  /* donut legend */
+  .legend-row{display:flex;align-items:center;gap:8px;font-size:13px;margin-bottom:7px;}
+  .legend-dot{width:11px;height:11px;border-radius:3px;flex-shrink:0;}
+
+  /* section eyebrow */
+  .eyebrow{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--primary);font-weight:600;margin-bottom:4px;}
+
   .hidden{display:none;}
-  a{color:var(--primary);}
+  a{color:var(--primary);text-decoration:none;}
+  a:hover{text-decoration:underline;}
+  code{background:#eceee9;padding:2px 7px;border-radius:5px;font-size:13px;font-family:'Inter';}
+
+  @media(max-width:820px){
+    .grid-3,.grid-4{grid-template-columns:1fr 1fr;}
+    .app{padding:18px 14px 50px;}
+  }
+  @media(max-width:520px){
+    .grid-2,.grid-3,.grid-4{grid-template-columns:1fr;}
+  }
 </style>
 </head>
 <body>
@@ -168,6 +264,12 @@ async function logActivity(companyId, action, entityType, entityId, details){
 // ============================================================
 async function boot(){
   if(CONFIG_ERROR){ renderConfigError(); return; }
+  // If the user arrived via a password-recovery link, the URL contains a recovery token.
+  // Show the reset form instead of the normal app.
+  if(window.location.hash.includes('type=recovery')){
+    showResetPasswordForm();
+    return;
+  }
   try{
     const { data: { session } } = await sb.auth.getSession();
     state.session = session;
@@ -243,31 +345,32 @@ function renderLogin(){
   document.getElementById('root').innerHTML = `
   <div class="login-wrap">
     <div class="card login-card">
-      <h2 style="margin-top:0;">POFlow</h2>
-      <p class="muted">PO & Vendor Invoice Management</p>
-      <div class="tabs" style="margin-bottom:14px;">
+      <div class="brand-lockup"><h2 style="margin:0;">PO<span style="color:var(--primary);">Flow</span></h2></div>
+      <p class="muted" style="margin-top:2px;">Purchase orders, vendors &amp; invoice approval</p>
+      <div class="tabs" style="margin:18px 0 16px;">
         <div class="tab active" id="tab-signin" onclick="switchAuthTab('signin')">Sign in</div>
         <div class="tab" id="tab-signup" onclick="switchAuthTab('signup')">Vendor sign up</div>
       </div>
       <div id="auth-signin">
         <label>Email</label>
         <input id="login-email" type="email" placeholder="you@company.com"/>
-        <label style="margin-top:10px;display:block;">Password</label>
+        <label style="margin-top:12px;display:block;">Password</label>
         <input id="login-pass" type="password" placeholder="••••••••"/>
-        <button class="btn btn-primary" style="width:100%;margin-top:14px;" onclick="doSignIn()">Sign in</button>
-        <p class="muted" id="login-msg" style="margin-top:8px;"></p>
+        <button class="btn btn-primary" style="width:100%;margin-top:16px;" onclick="doSignIn()">Sign in</button>
+        <p style="margin-top:12px;text-align:center;"><a href="#" onclick="showForgotPassword();return false;" style="font-size:13px;">Forgot password?</a></p>
+        <p class="muted" id="login-msg" style="margin-top:8px;color:var(--red);"></p>
       </div>
       <div id="auth-signup" class="hidden">
-        <p class="muted">Vendors: sign up, then wait for the company to activate your account.</p>
-        <label>Company invite code / slug</label>
+        <p class="muted">Vendors: sign up with the code your client gave you, then wait for them to activate your account.</p>
+        <label style="margin-top:8px;display:block;">Company code</label>
         <input id="signup-slug" placeholder="e.g. abc-traders"/>
-        <label style="margin-top:10px;display:block;">Vendor / Business name</label>
+        <label style="margin-top:12px;display:block;">Business name</label>
         <input id="signup-name" placeholder="Your business name"/>
-        <label style="margin-top:10px;display:block;">Email</label>
+        <label style="margin-top:12px;display:block;">Email</label>
         <input id="signup-email" type="email"/>
-        <label style="margin-top:10px;display:block;">Password</label>
+        <label style="margin-top:12px;display:block;">Password</label>
         <input id="signup-pass" type="password"/>
-        <button class="btn btn-primary" style="width:100%;margin-top:14px;" onclick="doVendorSignup()">Create vendor account</button>
+        <button class="btn btn-primary" style="width:100%;margin-top:16px;" onclick="doVendorSignup()">Create vendor account</button>
         <p class="muted" id="signup-msg" style="margin-top:8px;"></p>
       </div>
     </div>
@@ -286,6 +389,67 @@ async function doSignIn(){
   if(error){ document.getElementById('login-msg').textContent = error.message; return; }
   state.session = data.session;
   await resolveRole();
+}
+
+// ---- Forgot password: send reset email ----
+function showForgotPassword(){
+  document.getElementById('root').innerHTML = `
+  <div class="login-wrap">
+    <div class="card login-card">
+      <h2 style="margin-top:0;">Reset password</h2>
+      <p class="muted">Enter your account email. We'll send you a link to set a new password.</p>
+      <label style="margin-top:8px;display:block;">Email</label>
+      <input id="fp-email" type="email" placeholder="you@company.com"/>
+      <button class="btn btn-primary" style="width:100%;margin-top:14px;" onclick="sendResetEmail()">Send reset link</button>
+      <p style="margin-top:10px;text-align:center;"><a href="#" onclick="renderLogin();return false;" style="font-size:13px;">Back to sign in</a></p>
+      <p id="fp-msg" style="margin-top:8px;font-size:13px;"></p>
+    </div>
+  </div>`;
+}
+async function sendResetEmail(){
+  const email = document.getElementById('fp-email').value.trim();
+  const msg = document.getElementById('fp-msg');
+  msg.style.color = 'var(--red)';
+  if(!email){ msg.textContent = 'Enter your email.'; return; }
+  // The redirect brings the user back to this app with a recovery token in the URL,
+  // which onAuthStateChange picks up as a PASSWORD_RECOVERY event.
+  const { error } = await sb.auth.resetPasswordForEmail(email, {
+    redirectTo: window.location.origin + window.location.pathname
+  });
+  if(error){ msg.textContent = error.message; return; }
+  msg.style.color = 'var(--green)';
+  msg.textContent = 'If an account exists for that email, a reset link has been sent. Check your inbox (and spam).';
+}
+
+// ---- Set new password (shown when user returns via the reset link) ----
+function showResetPasswordForm(){
+  document.getElementById('root').innerHTML = `
+  <div class="login-wrap">
+    <div class="card login-card">
+      <h2 style="margin-top:0;">Set a new password</h2>
+      <p class="muted">Enter and confirm your new password.</p>
+      <label style="margin-top:8px;display:block;">New password (min 6 characters)</label>
+      <input id="rp-pass" type="password"/>
+      <label style="margin-top:10px;display:block;">Confirm new password</label>
+      <input id="rp-pass2" type="password"/>
+      <button class="btn btn-primary" style="width:100%;margin-top:14px;" onclick="submitNewPassword()">Update password</button>
+      <p id="rp-msg" style="margin-top:8px;font-size:13px;"></p>
+    </div>
+  </div>`;
+}
+async function submitNewPassword(){
+  const p1 = document.getElementById('rp-pass').value;
+  const p2 = document.getElementById('rp-pass2').value;
+  const msg = document.getElementById('rp-msg');
+  msg.style.color = 'var(--red)';
+  if(p1.length < 6){ msg.textContent = 'Password must be at least 6 characters.'; return; }
+  if(p1 !== p2){ msg.textContent = 'Passwords do not match.'; return; }
+  const { error } = await sb.auth.updateUser({ password: p1 });
+  if(error){ msg.textContent = error.message; return; }
+  msg.style.color = 'var(--green)';
+  msg.textContent = 'Password updated. Loading your account…';
+  state.session = (await sb.auth.getSession()).data.session;
+  setTimeout(()=>resolveRole(), 800);
 }
 async function doVendorSignup(){
   const slug = document.getElementById('signup-slug').value.trim().toLowerCase();
@@ -333,7 +497,7 @@ async function doVendorSignup(){
 function shell(title, roleLabel, bodyHtml){
   return `
   <header class="topbar">
-    <h1>POFlow ${title?('— '+title):''}</h1>
+    <h1>PO<span class="mark">Flow</span>${title?(' <span style="color:#7d8894;font-weight:400;">/ '+title+'</span>'):''}</h1>
     <div style="display:flex;align-items:center;gap:14px;">
       <span class="who">${roleLabel}</span>
       <button class="btn btn-sm" onclick="signOut()">Sign out</button>
@@ -355,18 +519,32 @@ async function renderSuperadmin(tab){
   </div>`;
 
   if(state.activeTab === 'companies'){
-    body += `<div class="card">
+    const active = companies.filter(c=>c.status==='active').length;
+    const byPlan = {};
+    companies.forEach(c=>{ byPlan[c.plan||'trial'] = (byPlan[c.plan||'trial']||0)+1; });
+    const mrr = companies.filter(c=>c.status==='active').reduce((s,c)=>{
+      const price = ({basic:999, professional:2499, advanced:4999})[c.plan] || 0; return s+price;
+    },0);
+    body += `
+    <div class="eyebrow">Portfolio</div>
+    <div class="grid grid-4" style="margin-bottom:20px;">
+      <div class="kpi"><div class="kpi-accent"></div><div class="kpi-label">Companies</div><div class="kpi-value">${companies.length}</div><div class="kpi-sub">${active} active</div></div>
+      <div class="kpi"><div class="kpi-accent"></div><div class="kpi-label">Est. monthly revenue</div><div class="kpi-value">₹${mrr.toLocaleString('en-IN')}</div><div class="kpi-sub">from active paid plans</div></div>
+      <div class="kpi amber"><div class="kpi-accent"></div><div class="kpi-label">On trial</div><div class="kpi-value">${byPlan['trial']||0}</div><div class="kpi-sub">to convert</div></div>
+      <div class="kpi blue"><div class="kpi-accent"></div><div class="kpi-label">Paid plans</div><div class="kpi-value">${(byPlan['basic']||0)+(byPlan['professional']||0)+(byPlan['advanced']||0)}</div><div class="kpi-sub">Basic·Pro·Advanced</div></div>
+    </div>
+    <div class="card">
       <div style="display:flex;justify-content:space-between;align-items:center;">
-        <h3 style="margin:0;">Companies (${companies.length})</h3>
+        <h3 style="margin:0;">Companies</h3>
         <button class="btn btn-primary" onclick="openNewCompanyModal()">+ New company</button>
       </div>
-      <table style="margin-top:12px;">
-        <tr><th>Name</th><th>Slug</th><th>Plan</th><th>Approval levels</th><th>Status</th><th></th></tr>
+      <table style="margin-top:14px;">
+        <tr><th>Name</th><th>Code</th><th>Plan</th><th>Approvals</th><th>Status</th><th></th></tr>
         ${companies.map(c=>`
           <tr>
-            <td>${c.name}</td>
-            <td class="muted">${c.slug}</td>
-            <td>${c.plan}</td>
+            <td style="font-weight:500;">${c.name}</td>
+            <td class="muted"><code>${c.slug}</code></td>
+            <td style="text-transform:capitalize;">${c.plan}</td>
             <td>${c.approval_levels}</td>
             <td>${badge(c.status)}</td>
             <td class="row-actions">
@@ -511,28 +689,144 @@ async function renderCompanyApp(tab){
   let body = `<div class="tabs">${tabs.map(([k,l])=>`<div class="tab ${state.activeTab===k?'active':''}" onclick="renderCompanyApp('${k}')">${l}</div>`).join('')}</div>`;
 
   if(state.activeTab === 'dashboard'){
-    const { data: pos } = await sb.from('purchase_orders').select('id,status').eq('company_id',cid);
-    const { data: invs } = await sb.from('invoices').select('id,status,total_amount').eq('company_id',cid);
-    const pending = (invs||[]).filter(i=>['submitted','under_review'].includes(i.status));
+    const { data: pos } = await sb.from('purchase_orders').select('id,status,total_amount,created_at,vendor_id,vendors(name)').eq('company_id',cid);
+    const { data: invs } = await sb.from('invoices').select('id,status,total_amount,submitted_at,vendor_id').eq('company_id',cid);
+    const { data: vendors } = await sb.from('vendors').select('id,name,status').eq('company_id',cid);
     const p = state.plan || {};
-    const vCount = await countRows('vendors');
     const uCount = await countRows('company_users');
-    const dCount = await docsThisMonth();
+
+    const poList = pos||[], invList = invs||[], vList = vendors||[];
+    const pending = invList.filter(i=>['submitted','under_review'].includes(i.status));
+    const approvedInv = invList.filter(i=>i.status==='approved' || i.status==='paid');
+    const paidInv = invList.filter(i=>i.status==='paid');
+    const approvedValue = approvedInv.reduce((s,i)=>s+Number(i.total_amount),0);
+    const paidValue = paidInv.reduce((s,i)=>s+Number(i.total_amount),0);
+    const poValue = poList.reduce((s,i)=>s+Number(i.total_amount),0);
+    const activeVendors = vList.filter(v=>v.status==='active').length;
+    const pendingVendors = vList.filter(v=>v.status==='pending').length;
+
+    // ---- monthly PO trend (last 6 months) ----
+    const months = [];
+    const now = new Date();
+    for(let k=5;k>=0;k--){
+      const d = new Date(now.getFullYear(), now.getMonth()-k, 1);
+      months.push({ key:`${d.getFullYear()}-${d.getMonth()}`, label:d.toLocaleDateString('en-IN',{month:'short'}), value:0, count:0 });
+    }
+    poList.forEach(po=>{
+      const d = new Date(po.created_at);
+      const key = `${d.getFullYear()}-${d.getMonth()}`;
+      const m = months.find(x=>x.key===key);
+      if(m){ m.value += Number(po.total_amount); m.count++; }
+    });
+    const maxMonth = Math.max(1, ...months.map(m=>m.value));
+    const barChart = `<div class="barchart">${months.map(m=>`
+      <div class="bar-col">
+        <div class="bar-val">${m.value>0?('₹'+Math.round(m.value/1000)+'k'):''}</div>
+        <div class="bar" style="height:${(m.value/maxMonth*100)}%" title="${fmtMoney(m.value)} · ${m.count} PO(s)"></div>
+        <div class="bar-label">${m.label}</div>
+      </div>`).join('')}</div>`;
+
+    // ---- top vendors by PO value ----
+    const vendorSpend = {};
+    poList.forEach(po=>{
+      const name = po.vendors?.name || 'Unknown';
+      vendorSpend[name] = (vendorSpend[name]||0) + Number(po.total_amount);
+    });
+    const topVendors = Object.entries(vendorSpend).sort((a,b)=>b[1]-a[1]).slice(0,5);
+    const maxVendor = Math.max(1, ...topVendors.map(v=>v[1]));
+    const topVendorsHtml = topVendors.length ? topVendors.map(([name,val])=>`
+      <div style="margin-bottom:11px;">
+        <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px;">
+          <span style="font-weight:500;">${name}</span><span style="font-variant-numeric:tabular-nums;color:var(--ink-soft);">${fmtMoney(val)}</span>
+        </div>
+        <div style="height:7px;background:#eceee9;border-radius:4px;overflow:hidden;">
+          <div style="height:100%;width:${(val/maxVendor*100)}%;background:linear-gradient(90deg,#159e83,#0f6f5c);border-radius:4px;"></div>
+        </div>
+      </div>`).join('') : '<p class="muted">No purchase orders yet.</p>';
+
+    // ---- invoice status donut (CSS conic) ----
+    const statusColors = { submitted:'#b8893a', under_review:'#b8893a', approved:'#0f6f5c', paid:'#3b5b9b', rejected:'#b23b3b' };
+    const statusCounts = {};
+    invList.forEach(i=>{ statusCounts[i.status] = (statusCounts[i.status]||0)+1; });
+    const totalInv = invList.length || 1;
+    let acc = 0;
+    const segments = Object.entries(statusCounts).map(([st,ct])=>{
+      const start = acc/totalInv*360; acc += ct; const end = acc/totalInv*360;
+      return `${statusColors[st]||'#ccc'} ${start}deg ${end}deg`;
+    }).join(', ');
+    const donut = invList.length ? `
+      <div style="display:flex;gap:20px;align-items:center;">
+        <div style="width:120px;height:120px;border-radius:50%;background:conic-gradient(${segments});flex-shrink:0;position:relative;">
+          <div style="position:absolute;inset:22px;background:#fff;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-direction:column;">
+            <span style="font-family:'Fraunces',serif;font-weight:700;font-size:22px;">${invList.length}</span>
+            <span style="font-size:10px;color:var(--ink-soft);text-transform:uppercase;letter-spacing:.05em;">Invoices</span>
+          </div>
+        </div>
+        <div style="flex:1;">
+          ${Object.entries(statusCounts).map(([st,ct])=>`
+            <div class="legend-row"><span class="legend-dot" style="background:${statusColors[st]||'#ccc'}"></span>
+            <span style="flex:1;text-transform:capitalize;">${st.replace('_',' ')}</span>
+            <span style="font-weight:600;font-variant-numeric:tabular-nums;">${ct}</span></div>`).join('')}
+        </div>
+      </div>` : '<p class="muted">No invoices submitted yet.</p>';
+
+    // ---- match health ----
+    const { data: invForMatch } = await sb.from('invoices').select('*, purchase_orders(*)').eq('company_id',cid);
+    let matched=0, partial=0, unmatched=0;
+    (invForMatch||[]).forEach(i=>{
+      const m = matchInvoiceToPO(i, i.purchase_orders);
+      if(m.status==='matched') matched++; else if(m.status==='partial') partial++; else unmatched++;
+    });
+
     const cap = (used, max) => max === null || max === undefined ? `${used} / ∞` : `${used} / ${max}`;
-    body += `<div class="grid grid-3">
-      <div class="card"><div class="stat">${(pos||[]).length}</div><div class="muted">Purchase orders</div></div>
-      <div class="card"><div class="stat">${pending.length}</div><div class="muted">Invoices pending approval</div></div>
-      <div class="card"><div class="stat">${fmtMoney((invs||[]).filter(i=>i.status==='approved').reduce((s,i)=>s+Number(i.total_amount),0))}</div><div class="muted">Approved (total value)</div></div>
+
+    body += `
+    <div class="eyebrow">Overview</div>
+    <div class="grid grid-4" style="margin-bottom:20px;">
+      <div class="kpi"><div class="kpi-accent"></div><div class="kpi-label">Total PO value</div><div class="kpi-value">${fmtMoney(poValue)}</div><div class="kpi-sub">${poList.length} purchase order(s)</div></div>
+      <div class="kpi amber"><div class="kpi-accent"></div><div class="kpi-label">Pending approval</div><div class="kpi-value">${pending.length}</div><div class="kpi-sub">${fmtMoney(pending.reduce((s,i)=>s+Number(i.total_amount),0))} awaiting</div></div>
+      <div class="kpi"><div class="kpi-accent"></div><div class="kpi-label">Approved invoices</div><div class="kpi-value">${fmtMoney(approvedValue)}</div><div class="kpi-sub">${approvedInv.length} approved</div></div>
+      <div class="kpi blue"><div class="kpi-accent"></div><div class="kpi-label">Paid</div><div class="kpi-value">${fmtMoney(paidValue)}</div><div class="kpi-sub">${paidInv.length} settled</div></div>
     </div>
-    <div class="card" style="margin-top:4px;">
+
+    <div class="grid grid-2">
+      <div class="card">
+        <h3 style="margin-top:0;">Purchase orders — last 6 months</h3>
+        ${barChart}
+      </div>
+      <div class="card">
+        <h3 style="margin-top:0;">Invoice status</h3>
+        ${donut}
+      </div>
+    </div>
+
+    <div class="grid grid-2">
+      <div class="card">
+        <h3 style="margin-top:0;">Top vendors by value</h3>
+        ${topVendorsHtml}
+      </div>
+      <div class="card">
+        <h3 style="margin-top:0;">Invoice–PO match health</h3>
+        <div class="grid grid-3" style="gap:10px;margin-bottom:14px;">
+          <div style="text-align:center;padding:12px;background:#e2efea;border-radius:10px;"><div class="stat" style="color:#0f6f5c;">${matched}</div><div class="muted" style="font-size:11px;">Matched</div></div>
+          <div style="text-align:center;padding:12px;background:#f7efe0;border-radius:10px;"><div class="stat" style="color:#8a6420;">${partial}</div><div class="muted" style="font-size:11px;">Partial</div></div>
+          <div style="text-align:center;padding:12px;background:#f8eded;border-radius:10px;"><div class="stat" style="color:#b23b3b;">${unmatched}</div><div class="muted" style="font-size:11px;">Unmatched</div></div>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:13px;padding-top:10px;border-top:1px solid var(--border);">
+          <span class="muted">Active vendors</span><strong>${activeVendors}${pendingVendors?` <span class="muted">(+${pendingVendors} pending)</span>`:''}</strong>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
       <div style="display:flex;justify-content:space-between;align-items:center;">
-        <h3 style="margin:0;">Plan: ${(state.company.plan||'trial').replace(/^./,c=>c.toUpperCase())}</h3>
+        <h3 style="margin:0;">Plan · ${(state.company.plan||'trial').replace(/^./,c=>c.toUpperCase())}</h3>
         ${p.price_monthly ? `<span class="muted">₹${p.price_monthly}/mo + GST</span>` : '<span class="badge badge-submitted">Trial</span>'}
       </div>
-      <div class="grid grid-3" style="margin-top:10px;">
-        <div><div class="muted">Team users</div><strong>${cap(uCount, p.max_users)}</strong></div>
-        <div><div class="muted">Vendors</div><strong>${cap(vCount, p.max_vendors)}</strong></div>
-        <div><div class="muted">Docs this month</div><strong>${cap(dCount, p.max_docs_per_month)}</strong></div>
+      <div class="grid grid-3" style="margin-top:14px;">
+        <div><div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;">Team users</div><strong style="font-size:17px;font-variant-numeric:tabular-nums;">${cap(uCount, p.max_users)}</strong></div>
+        <div><div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;">Vendors</div><strong style="font-size:17px;font-variant-numeric:tabular-nums;">${cap(vList.length, p.max_vendors)}</strong></div>
+        <div><div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;">Docs this month</div><strong style="font-size:17px;font-variant-numeric:tabular-nums;">${cap(await docsThisMonth(), p.max_docs_per_month)}</strong></div>
       </div>
     </div>`;
   }
@@ -1854,6 +2148,10 @@ if(typeof supabase === 'undefined'){
 } else if(sb){
   sb.auth.onAuthStateChange((event, session) => {
     state.session = session;
+    if(event === 'PASSWORD_RECOVERY'){
+      // User arrived via the reset-password email link — show the set-new-password form.
+      showResetPasswordForm();
+    }
   });
   boot();
 } else {
