@@ -153,6 +153,22 @@
   a:hover{text-decoration:underline;}
   code{background:#eceee9;padding:2px 7px;border-radius:5px;font-size:13px;font-family:'Inter';}
 
+  /* ---- Universal filter bar ---- */
+  .filterbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:14px 0 4px;padding:12px 14px;background:#f6f7f3;border:1px solid var(--border);border-radius:10px;}
+  .filterbar .fb-search{flex:1;min-width:180px;}
+  .filterbar input,.filterbar select{margin-top:0;padding:8px 10px;font-size:13px;background:#fff;}
+  .filterbar .fb-group{display:flex;flex-direction:column;gap:2px;}
+  .filterbar .fb-label{font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--ink-soft);font-weight:600;}
+  .filterbar .fb-clear{align-self:flex-end;font-size:12px;color:var(--primary);cursor:pointer;background:none;border:none;padding:8px 4px;font-weight:600;}
+  .filterbar .fb-clear:hover{text-decoration:underline;}
+  .fb-count{font-size:12px;color:var(--ink-soft);margin:6px 2px 0;}
+  tr.fb-hidden{display:none;}
+
+  /* ITC / 2B badges */
+  .badge-reflected{background:#e2efea;color:#0f6f5c;}
+  .badge-not_reflected{background:#f8eded;color:#b23b3b;}
+  .badge-pending2b{background:#f7efe0;color:#8a6420;}
+
   @media(max-width:820px){
     .grid-3,.grid-4{grid-template-columns:1fr 1fr;}
     .app{padding:18px 14px 50px;}
@@ -247,6 +263,119 @@ function fmtDate(d){
 }
 function badge(status){
   return `<span class="badge badge-${status}">${status.replace('_',' ')}</span>`;
+}
+
+// ============================================================
+// UNIVERSAL FILTER SYSTEM
+// Renders a filter bar (search + dropdowns) above a table and
+// filters the table's rows live in the browser. No server calls.
+//
+// buildFilterBar(id, config) returns HTML for the bar.
+// config = {
+//   search: true,                       // show free-text search box
+//   selects: [                          // dropdown filters
+//     { key:'status', label:'Status', options:['sent','closed',...] }
+//   ]
+// }
+// Each table row must carry data attributes matching the select keys,
+// e.g. <tr data-status="sent" data-vendor="ABC" data-search="all text">.
+// The search box matches against data-search (a lowercased blob).
+// ============================================================
+function buildFilterBar(tableId, config){
+  const parts = [];
+  if(config.search !== false){
+    parts.push(`<div class="fb-group fb-search">
+      <span class="fb-label">Search</span>
+      <input type="text" id="fb-${tableId}-search" placeholder="Type to filter…" oninput="applyFilters('${tableId}')"/>
+    </div>`);
+  }
+  (config.selects||[]).forEach(sel=>{
+    const opts = ['<option value="">All</option>']
+      .concat(sel.options.map(o=>{
+        const val = typeof o === 'object' ? o.value : o;
+        const lab = typeof o === 'object' ? o.label : o.replace(/_/g,' ');
+        return `<option value="${val}">${lab}</option>`;
+      })).join('');
+    parts.push(`<div class="fb-group">
+      <span class="fb-label">${sel.label}</span>
+      <select id="fb-${tableId}-${sel.key}" data-key="${sel.key}" onchange="applyFilters('${tableId}')">${opts}</select>
+    </div>`);
+  });
+  if(config.amount){
+    parts.push(`<div class="fb-group"><span class="fb-label">Min ₹</span>
+      <input type="number" id="fb-${tableId}-amtmin" style="width:100px;" placeholder="0" oninput="applyFilters('${tableId}')"/></div>`);
+    parts.push(`<div class="fb-group"><span class="fb-label">Max ₹</span>
+      <input type="number" id="fb-${tableId}-amtmax" style="width:100px;" placeholder="∞" oninput="applyFilters('${tableId}')"/></div>`);
+  }
+  parts.push(`<button class="fb-clear" onclick="clearFilters('${tableId}')">Clear</button>`);
+  return `<div class="filterbar">${parts.join('')}</div><div class="fb-count" id="fb-${tableId}-count"></div>`;
+}
+
+function applyFilters(tableId){
+  const table = document.getElementById(tableId);
+  if(!table) return;
+  const searchEl = document.getElementById(`fb-${tableId}-search`);
+  const search = searchEl ? searchEl.value.trim().toLowerCase() : '';
+  const amtMinEl = document.getElementById(`fb-${tableId}-amtmin`);
+  const amtMaxEl = document.getElementById(`fb-${tableId}-amtmax`);
+  const amtMin = amtMinEl && amtMinEl.value !== '' ? parseFloat(amtMinEl.value) : null;
+  const amtMax = amtMaxEl && amtMaxEl.value !== '' ? parseFloat(amtMaxEl.value) : null;
+  // collect active selects
+  const selects = Array.from(table.parentElement.querySelectorAll(`select[id^="fb-${tableId}-"]`));
+  const rows = Array.from(table.querySelectorAll('tbody tr, tr')).filter(r=>r.querySelector('td'));
+  let shown = 0;
+  rows.forEach(row=>{
+    let visible = true;
+    // free-text search against data-search
+    if(search){
+      const blob = (row.getAttribute('data-search')||row.textContent||'').toLowerCase();
+      if(!blob.includes(search)) visible = false;
+    }
+    // dropdown filters
+    if(visible){
+      for(const sel of selects){
+        const key = sel.getAttribute('data-key');
+        const want = sel.value;
+        if(want){
+          const have = row.getAttribute('data-'+key) || '';
+          if(have !== want){ visible = false; break; }
+        }
+      }
+    }
+    // amount range against data-amount
+    if(visible && (amtMin !== null || amtMax !== null)){
+      const amt = parseFloat(row.getAttribute('data-amount')||'0');
+      if(amtMin !== null && amt < amtMin) visible = false;
+      if(amtMax !== null && amt > amtMax) visible = false;
+    }
+    row.classList.toggle('fb-hidden', !visible);
+    if(visible) shown++;
+  });
+  const countEl = document.getElementById(`fb-${tableId}-count`);
+  if(countEl) countEl.textContent = `Showing ${shown} of ${rows.length}`;
+}
+
+function clearFilters(tableId){
+  const wrap = document.getElementById(tableId).parentElement;
+  wrap.querySelectorAll(`[id^="fb-${tableId}-"]`).forEach(el=>{
+    if(el.tagName === 'INPUT') el.value = '';
+    if(el.tagName === 'SELECT') el.value = '';
+  });
+  applyFilters(tableId);
+}
+
+// GSTR-2B / ITC helpers
+function gstr2bBadge(status){
+  const map = { reflected:'reflected', not_reflected:'not_reflected', pending:'pending2b' };
+  const label = { reflected:'In 2B', not_reflected:'Not in 2B', pending:'2B pending' };
+  const s = status || 'pending';
+  return `<span class="badge badge-${map[s]}">${label[s]}</span>`;
+}
+// GST amount considered "on hold" when not yet reflected in 2B
+function itcOnHold(inv){
+  const st = inv.gstr2b_status || 'pending';
+  if(st === 'reflected') return 0;
+  return Number(inv.gst_amount || 0);
 }
 async function logActivity(companyId, action, entityType, entityId, details){
   try{
@@ -690,7 +819,7 @@ async function renderCompanyApp(tab){
 
   if(state.activeTab === 'dashboard'){
     const { data: pos } = await sb.from('purchase_orders').select('id,status,total_amount,created_at,vendor_id,vendors(name)').eq('company_id',cid);
-    const { data: invs } = await sb.from('invoices').select('id,status,total_amount,submitted_at,vendor_id').eq('company_id',cid);
+    const { data: invs } = await sb.from('invoices').select('id,status,total_amount,submitted_at,vendor_id,gstr2b_status,gst_amount').eq('company_id',cid);
     const { data: vendors } = await sb.from('vendors').select('id,name,status').eq('company_id',cid);
     const p = state.plan || {};
     const uCount = await countRows('company_users');
@@ -701,6 +830,7 @@ async function renderCompanyApp(tab){
     const paidInv = invList.filter(i=>i.status==='paid');
     const approvedValue = approvedInv.reduce((s,i)=>s+Number(i.total_amount),0);
     const paidValue = paidInv.reduce((s,i)=>s+Number(i.total_amount),0);
+    const itcHoldTotal = invList.reduce((s,i)=>s+itcOnHold(i),0);
     const poValue = poList.reduce((s,i)=>s+Number(i.total_amount),0);
     const activeVendors = vList.filter(v=>v.status==='active').length;
     const pendingVendors = vList.filter(v=>v.status==='pending').length;
@@ -786,7 +916,7 @@ async function renderCompanyApp(tab){
       <div class="kpi"><div class="kpi-accent"></div><div class="kpi-label">Total PO value</div><div class="kpi-value">${fmtMoney(poValue)}</div><div class="kpi-sub">${poList.length} purchase order(s)</div></div>
       <div class="kpi amber"><div class="kpi-accent"></div><div class="kpi-label">Pending approval</div><div class="kpi-value">${pending.length}</div><div class="kpi-sub">${fmtMoney(pending.reduce((s,i)=>s+Number(i.total_amount),0))} awaiting</div></div>
       <div class="kpi"><div class="kpi-accent"></div><div class="kpi-label">Approved invoices</div><div class="kpi-value">${fmtMoney(approvedValue)}</div><div class="kpi-sub">${approvedInv.length} approved</div></div>
-      <div class="kpi blue"><div class="kpi-accent"></div><div class="kpi-label">Paid</div><div class="kpi-value">${fmtMoney(paidValue)}</div><div class="kpi-sub">${paidInv.length} settled</div></div>
+      <div class="kpi red"><div class="kpi-accent"></div><div class="kpi-label">GST / ITC on hold</div><div class="kpi-value">${fmtMoney(itcHoldTotal)}</div><div class="kpi-sub">until reflected in GSTR-2B</div></div>
     </div>
 
     <div class="grid grid-2">
@@ -835,6 +965,8 @@ async function renderCompanyApp(tab){
     const { data: pos, error: posErr } = await sb.from('purchase_orders').select('*, vendors(name)').eq('company_id',cid).order('created_at',{ascending:false});
     const yearSpent = (pos||[]).filter(p=>['sent','acknowledged','closed'].includes(p.status)).reduce((s,p)=>s+Number(p.total_amount),0);
     const budgetLine = state.company.annual_budget ? `<p class="muted">Committed spend: ${fmtMoney(yearSpent)} of ${fmtMoney(state.company.annual_budget)} budget${yearSpent > state.company.annual_budget ? ' <span class="badge badge-rejected">over budget</span>' : ''}</p>` : '';
+    const poVendors = [...new Set((pos||[]).map(p=>p.vendors?.name).filter(Boolean))];
+    const poStatuses = [...new Set((pos||[]).map(p=>p.status).filter(Boolean))];
     body += `<div class="card">
       <div style="display:flex;justify-content:space-between;align-items:center;">
         <h3 style="margin:0;">Purchase Orders</h3>
@@ -842,9 +974,13 @@ async function renderCompanyApp(tab){
       </div>
       ${budgetLine}
       ${posErr ? `<p style="color:var(--red);">Couldn't load purchase orders: ${posErr.message}</p>` : ''}
-      <table style="margin-top:12px;">
+      ${buildFilterBar('po-table', { search:true, amount:true, selects:[
+        {key:'vendor', label:'Vendor', options: poVendors},
+        {key:'status', label:'Status', options: poStatuses}
+      ]})}
+      <table id="po-table" style="margin-top:6px;">
         <tr><th>PO #</th><th>Vendor</th><th>Amount</th><th>Status</th><th>Created</th><th></th></tr>
-        ${(pos||[]).map(p=>`<tr>
+        ${(pos||[]).map(p=>`<tr data-vendor="${(p.vendors?.name||'').replace(/"/g,'&quot;')}" data-status="${p.status}" data-amount="${p.total_amount}" data-search="${(p.po_number+' '+(p.vendors?.name||'')+' '+p.status).toLowerCase().replace(/"/g,'&quot;')}">
           <td>${p.po_number}</td><td>${p.vendors?.name||''}</td><td>${fmtMoney(p.total_amount)}</td>
           <td>${badge(p.status)}</td><td class="muted">${fmtDate(p.created_at)}</td>
           <td class="row-actions">
@@ -862,32 +998,53 @@ async function renderCompanyApp(tab){
   else if(state.activeTab === 'invoices'){
     const { data: invs, error: invErr } = await sb.from('invoices').select('*, vendors(name), purchase_orders(*)').eq('company_id',cid).order('submitted_at',{ascending:false});
     window.__invoicesForExport = invs || [];
+    const totalHold = (invs||[]).reduce((s,i)=>s+itcOnHold(i),0);
+    const invVendors = [...new Set((invs||[]).map(i=>i.vendors?.name).filter(Boolean))];
+    const invStatuses = [...new Set((invs||[]).map(i=>i.status).filter(Boolean))];
+    const holdBanner = totalHold > 0
+      ? `<div style="background:#f8eded;border:1px solid #e4c4c4;border-radius:10px;padding:12px 14px;margin:6px 0;font-size:13.5px;color:#8a2b2b;">
+          <strong>⚠ ITC at risk:</strong> ${fmtMoney(totalHold)} of GST is on hold across invoices not yet reflected in GSTR-2B. Release once the vendor files and the invoice appears in your 2B.
+        </div>` : '';
     body += `<div class="card">
       <div style="display:flex;justify-content:space-between;align-items:center;">
         <h3 style="margin:0;">Invoices</h3>
         <button class="btn btn-sm" onclick="exportInvoicesCSV()">Export CSV</button>
       </div>
       ${invErr ? `<p style="color:var(--red);">Couldn't load invoices: ${invErr.message}</p>` : ''}
-      <table>
-        <tr><th>Invoice #</th><th>Vendor</th><th>PO</th><th>Amount</th><th>PO Match</th><th>Status</th><th>Submitted</th><th></th></tr>
+      ${holdBanner}
+      ${buildFilterBar('inv-table', { search:true, amount:true, selects:[
+        {key:'vendor', label:'Vendor', options: invVendors},
+        {key:'status', label:'Status', options: invStatuses},
+        {key:'gst2b', label:'GSTR-2B', options:[
+          {value:'reflected',label:'In 2B'},{value:'not_reflected',label:'Not in 2B'},{value:'pending',label:'2B pending'}
+        ]}
+      ]})}
+      <table id="inv-table" style="margin-top:6px;">
+        <tr><th>Invoice #</th><th>Vendor</th><th>PO</th><th>Amount</th><th>GST (ITC)</th><th>GSTR-2B</th><th>PO Match</th><th>Status</th><th>Submitted</th><th></th></tr>
         ${(invs||[]).map(i=>{
           const m = matchInvoiceToPO(i, i.purchase_orders);
-          return `<tr>
+          const hold = itcOnHold(i);
+          const st2b = i.gstr2b_status || 'pending';
+          return `<tr data-vendor="${(i.vendors?.name||'').replace(/"/g,'&quot;')}" data-status="${i.status}" data-gst2b="${st2b}" data-amount="${i.total_amount}" data-search="${(i.invoice_number+' '+(i.vendors?.name||'')+' '+(i.purchase_orders?.po_number||'')+' '+i.status).toLowerCase().replace(/"/g,'&quot;')}">
           <td>${i.invoice_number}</td><td>${i.vendors?.name||''}</td><td>${i.purchase_orders?.po_number||'—'}</td>
           <td>${fmtMoney(i.total_amount)}</td>
+          <td>${Number(i.gst_amount)>0?fmtMoney(i.gst_amount):'—'}${hold>0?`<div class="muted" style="color:#b23b3b;">on hold</div>`:''}</td>
+          <td>${gstr2bBadge(st2b)}</td>
           <td>${matchBadge(m.status)}</td>
           <td>${badge(i.status)}${i.status==='paid'&&i.payment_reference?`<div class="muted">Ref: ${i.payment_reference}</div>`:''}</td><td class="muted">${fmtDate(i.submitted_at)}</td>
           <td class="row-actions">
             <button class="btn btn-sm" onclick='openInvoiceModal(${JSON.stringify(i.id)})'>Review</button>
+            ${isAdmin ? `<button class="btn btn-sm" onclick='openGstr2bModal(${JSON.stringify(i.id)})'>2B</button>` : ''}
             ${isAdmin && i.status==='approved' ? `<button class="btn btn-sm btn-green" onclick='markInvoicePaid(${JSON.stringify(i.id)})'>Mark paid</button>` : ''}
           </td>
-        </tr>`;}).join('') || `<tr><td colspan="8" class="muted">${invErr ? '' : 'No invoices submitted yet.'}</td></tr>`}
+        </tr>`;}).join('') || `<tr><td colspan="10" class="muted">${invErr ? '' : 'No invoices submitted yet.'}</td></tr>`}
       </table>
     </div>`;
   }
 
   else if(state.activeTab === 'vendors'){
     const { data: vendors, error: vendErr } = await sb.from('vendors').select('*').eq('company_id',cid).order('created_at',{ascending:false});
+    const vStatuses = [...new Set((vendors||[]).map(v=>v.status).filter(Boolean))];
     body += `<div class="card">
       <div style="display:flex;justify-content:space-between;align-items:center;">
         <h3 style="margin:0;">Vendors</h3>
@@ -898,9 +1055,12 @@ async function renderCompanyApp(tab){
         <div class="muted" style="margin-top:4px;">Share this code with your vendors. They open the app → "Vendor sign up" tab → enter this exact code, their business name, email and a password. They'll appear here as "pending" for you to activate. Tip: if you add a vendor below with their email first, their signup automatically links to that row instead of creating a duplicate.</div>
       </div>
       ${vendErr ? `<p style="color:var(--red);">Couldn't load vendors: ${vendErr.message}</p>` : ''}
-      <table>
+      ${buildFilterBar('vendor-table', { search:true, selects:[
+        {key:'status', label:'Status', options: vStatuses}
+      ]})}
+      <table id="vendor-table" style="margin-top:6px;">
         <tr><th>Name</th><th>Email</th><th>GSTIN</th><th>Status</th><th></th></tr>
-        ${(vendors||[]).map(v=>`<tr>
+        ${(vendors||[]).map(v=>`<tr data-status="${v.status}" data-search="${(v.name+' '+v.email+' '+(v.gstin||'')+' '+v.status).toLowerCase().replace(/"/g,'&quot;')}">
           <td>${v.name}</td><td>${v.email}</td><td class="muted">${v.gstin||'-'}</td><td>${badge(v.status)}</td>
           <td class="row-actions">
             <button class="btn btn-sm" onclick='openVendorDetail(${JSON.stringify(v.id)})'>View</button>
@@ -1082,6 +1242,51 @@ async function markInvoicePaid(id){
   await sb.from('invoices').update({status:'paid', payment_reference: ref, paid_at: new Date().toISOString()}).eq('id', id);
   await logActivity(state.company.id, 'invoice_paid', 'invoice', id, {ref});
   toast('Marked as paid'); renderCompanyApp('invoices');
+}
+
+// ---- GSTR-2B status modal ----
+async function openGstr2bModal(id){
+  const { data: i, error } = await sb.from('invoices').select('*, vendors(name)').eq('id', id).single();
+  if(error){ toast(error.message, true); return; }
+  const st = i.gstr2b_status || 'pending';
+  const hold = itcOnHold(i);
+  showModal(`
+    <span class="close-x" onclick="closeModal()">✕</span>
+    <h3>GSTR-2B / ITC status</h3>
+    <p class="muted">Invoice ${i.invoice_number} · ${i.vendors?.name||''}</p>
+    <table style="font-size:13px;margin:10px 0;">
+      <tr><td>Invoice total</td><td style="text-align:right;">${fmtMoney(i.total_amount)}</td></tr>
+      <tr><td>Taxable value</td><td style="text-align:right;">${fmtMoney(i.taxable_value||i.total_amount)}</td></tr>
+      <tr><td>GST amount</td><td style="text-align:right;">${fmtMoney(i.gst_amount||0)}</td></tr>
+      <tr><td><strong>Currently on hold</strong></td><td style="text-align:right;color:${hold>0?'#b23b3b':'#0f6f5c'};"><strong>${fmtMoney(hold)}</strong></td></tr>
+    </table>
+    <p style="font-size:13px;color:var(--ink-soft);">Mark whether this invoice is reflected in your GSTR-2B. GST stays on hold until it reflects (i.e. the vendor has filed their GSTR-1).</p>
+    <label style="display:block;margin-top:8px;">GSTR-2B status</label>
+    <select id="g2b-status">
+      <option value="pending" ${st==='pending'?'selected':''}>2B pending — not yet checked</option>
+      <option value="not_reflected" ${st==='not_reflected'?'selected':''}>Not in 2B — hold GST (vendor hasn't filed)</option>
+      <option value="reflected" ${st==='reflected'?'selected':''}>In 2B — ITC safe, release hold</option>
+    </select>
+    <label style="display:block;margin-top:10px;">GST amount for this invoice (₹)</label>
+    <input id="g2b-gst" type="number" value="${i.gst_amount||0}" step="0.01"/>
+    <p class="muted" style="font-size:12px;margin-top:4px;">If left as 0, nothing is held. Enter the CGST+SGST+IGST so the system can track the exact amount at risk.</p>
+    <button class="btn btn-primary" style="width:100%;margin-top:14px;" onclick="saveGstr2b('${id}')">Save 2B status</button>
+  `);
+}
+async function saveGstr2b(id){
+  const status = document.getElementById('g2b-status').value;
+  const gst = parseFloat(document.getElementById('g2b-gst').value) || 0;
+  const { data: inv } = await sb.from('invoices').select('total_amount').eq('id', id).single();
+  const patch = {
+    gstr2b_status: status,
+    gst_amount: gst,
+    taxable_value: inv ? Number(inv.total_amount) - gst : null,
+    gstr2b_checked_at: new Date().toISOString()
+  };
+  const { error } = await sb.from('invoices').update(patch).eq('id', id);
+  if(error){ toast(error.message, true); return; }
+  await logActivity(state.company.id, 'gstr2b_updated', 'invoice', id, {status, gst});
+  closeModal(); toast('2B status saved'); renderCompanyApp('invoices');
 }
 
 // ---- CSV export ----
