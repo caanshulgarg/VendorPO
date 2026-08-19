@@ -1866,13 +1866,18 @@ async function markInvoicePaid(id){
 async function deletePayment(paymentId, invoiceId){
   if(blockedReadOnly()) return;
   if(!confirm('Delete this payment? The invoice balance and status will recalculate automatically.')) return;
-  const { error: delErr } = await sb.from('payments').delete().eq('id', paymentId);
-  if(delErr){ toast(delErr.message, true); return; }
+  // Delete and ask for the deleted rows back, so we can confirm it actually happened.
+  const { data: deleted, error: delErr } = await sb.from('payments').delete().eq('id', paymentId).select();
+  if(delErr){ toast('Could not delete: '+delErr.message, true); return; }
+  if(!deleted || deleted.length === 0){
+    toast('Delete blocked by permissions. Run the payments migration in Supabase (delete policy), then retry.', true);
+    return;
+  }
   await recalcInvoicePayments(invoiceId);
   await logActivity(state.company.id, 'payment_deleted', 'invoice', invoiceId, {paymentId});
   toast('Payment removed — balance recalculated');
   closeModal();
-  markInvoicePaid(invoiceId); // reopen with fresh numbers
+  markInvoicePaid(invoiceId); // reopen with fresh numbers so you can delete/add more
 }
 // Single source of truth: recompute an invoice's amount_paid + status from its
 // actual payment records. Called after any add/delete so everything stays correct.
