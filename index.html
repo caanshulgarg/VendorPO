@@ -4,8 +4,37 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Kiyra — PO & Vendor Invoice Management</title>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script>
+// Resilient library loader: try jsDelivr first, fall back to unpkg if a CDN
+// is blocked (some ISPs block jsDelivr). Prevents a blank page on CDN failure.
+(function(){
+  function loadScript(urls, done){
+    var i = 0;
+    function attempt(){
+      if(i >= urls.length){ done && done(new Error('all CDNs failed')); return; }
+      var s = document.createElement('script');
+      s.src = urls[i++];
+      s.onload = function(){ done && done(null); };
+      s.onerror = function(){ attempt(); };
+      document.head.appendChild(s);
+    }
+    attempt();
+  }
+  window.__loadLibs = function(cb){
+    loadScript([
+      'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2',
+      'https://unpkg.com/@supabase/supabase-js@2',
+      'https://cdn.skypack.dev/@supabase/supabase-js@2'
+    ], function(err){
+      // load xlsx too (non-critical — app still works without it, exports degrade)
+      loadScript([
+        'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js',
+        'https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js'
+      ], function(){ cb(err); });
+    });
+  };
+})();
+</script>
 <style>
   /* ============================================================
      Kiyra — professional SaaS dashboard
@@ -268,11 +297,8 @@ if(!SUPABASE_URL || SUPABASE_URL === "YOUR_SUPABASE_URL" || !isValidHttpUrl(SUPA
 } else if(!SUPABASE_ANON_KEY || SUPABASE_ANON_KEY === "YOUR_SUPABASE_ANON_KEY" || SUPABASE_ANON_KEY.length < 20){
   CONFIG_ERROR = `SUPABASE_ANON_KEY is missing or looks invalid. Copy the "anon public" key from Supabase → Settings → API.`;
 } else {
-  try {
-    sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-  } catch(e){
-    CONFIG_ERROR = `Supabase client failed to initialize: ${e.message}`;
-  }
+  // Client is created later in startApp(), after the Supabase library has loaded
+  // (it loads asynchronously with CDN fallback). Just validate config here.
 }
 
 function renderConfigError(){
@@ -3797,23 +3823,36 @@ function closeModal(){
 // ============================================================
 // GO
 // ============================================================
-if(typeof supabase === 'undefined'){
-  document.getElementById('root').innerHTML = `
-  <div class="login-wrap"><div class="card login-card" style="width:480px;">
-    <h2 style="margin-top:0;color:var(--red);">Failed to load Supabase library</h2>
-    <p>The script from cdn.jsdelivr.net didn't load. Check your internet connection, or that your network/firewall isn't blocking cdn.jsdelivr.net, then reload the page.</p>
-  </div></div>`;
-} else if(sb){
-  sb.auth.onAuthStateChange((event, session) => {
-    state.session = session;
-    if(event === 'PASSWORD_RECOVERY'){
-      // User arrived via the reset-password email link — show the set-new-password form.
-      showResetPasswordForm();
-    }
-  });
-  boot();
+function startApp(){
+  if(typeof supabase === 'undefined'){
+    document.getElementById('root').innerHTML = `
+    <div class="login-wrap"><div class="card login-card" style="width:480px;margin:40px auto;">
+      <h2 style="margin-top:0;color:var(--red);">Couldn't load a required library</h2>
+      <p>The Supabase library couldn't be loaded from any CDN. This is usually a network or firewall issue blocking cdn.jsdelivr.net, unpkg.com and skypack.dev.</p>
+      <p class="muted">Try a different network (e.g. mobile data), disable any ad-blocker/firewall for this site, then reload. If it persists, your ISP may be blocking these CDNs.</p>
+      <button class="btn btn-primary" style="margin-top:10px;" onclick="location.reload()">Reload</button>
+    </div></div>`;
+    return;
+  }
+  // create the client now that the library is present
+  try { sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY); } catch(e){}
+  if(sb){
+    sb.auth.onAuthStateChange((event, session) => {
+      state.session = session;
+      if(event === 'PASSWORD_RECOVERY'){
+        showResetPasswordForm();
+      }
+    });
+    boot();
+  } else {
+    boot(); // will render the CONFIG_ERROR message
+  }
+}
+// Kick off: load libraries (with CDN fallback), then start.
+if(window.__loadLibs){
+  window.__loadLibs(function(){ startApp(); });
 } else {
-  boot(); // will render the CONFIG_ERROR message
+  startApp();
 }
 </script>
 </body>
