@@ -835,7 +835,7 @@ async function renderCompanyApp(tab){
   const cid = state.company.id;
   const isAdmin = state.role === 'company_admin';
 
-  let tabs = [['dashboard','Dashboard'],['pos','Purchase Orders'],['invoices','Invoices / Approvals'],['payables','Payables'],['payments','Payments'],['vendors','Vendors']];
+  let tabs = [['dashboard','Dashboard'],['pos','Purchase Orders'],['invoices','Invoices / Approvals'],['payables','Payables'],['payments','Payments'],['reports','Reports'],['vendors','Vendors']];
   if(isAdmin) tabs.push(['users','Team']);
   if(isAdmin) tabs.push(['settings','Settings']);
 
@@ -1156,6 +1156,39 @@ async function renderCompanyApp(tab){
         </tr>`).join('') || '<tr><td colspan="5" class="muted">No payments recorded yet.</td></tr>'}
       </table>
     </div>`;
+  }
+
+  else if(state.activeTab === 'reports'){
+    // Report picker + date range. The actual report renders into #report-output.
+    const rep = state.reportType || 'payables';
+    const from = state.reportFrom || '';
+    const to = state.reportTo || '';
+    const reportOptions = [
+      ['payables','Vendor-wise payables / pendency'],
+      ['itc','GST / ITC hold register'],
+      ['purchase','Purchase register (POs)'],
+      ['paymentreg','Payment register'],
+      ['aging','Aging report (0-30-60-90)'],
+      ['gstcompliance','Vendor GST compliance']
+    ];
+    body += `<div class="card">
+      <h3 style="margin-top:0;">Reports</h3>
+      <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;">
+        <div class="fb-group" style="min-width:260px;">
+          <span class="fb-label">Report</span>
+          <select id="rep-type" onchange="onReportChange()">
+            ${reportOptions.map(([v,l])=>`<option value="${v}" ${rep===v?'selected':''}>${l}</option>`).join('')}
+          </select>
+        </div>
+        <div class="fb-group"><span class="fb-label">From</span><input type="date" id="rep-from" value="${from}"/></div>
+        <div class="fb-group"><span class="fb-label">To</span><input type="date" id="rep-to" value="${to}"/></div>
+        <button class="btn btn-primary" onclick="runReport()">Run report</button>
+      </div>
+      <p class="muted" style="margin-top:8px;font-size:12px;">Leave dates blank to include everything. Date range applies to the document/transaction date of each report.</p>
+    </div>
+    <div id="report-output"></div>`;
+    // auto-run current report after render
+    setTimeout(()=>runReport(), 30);
   }
 
   else if(state.activeTab === 'vendors'){
@@ -1621,6 +1654,150 @@ function exportInvoices(fmt){
   if(fmt==='csv') exportRowsCSV(fn, headers, rows);
   else if(fmt==='xlsx') exportRowsXLSX(fn, headers, rows, 'Invoices');
   else exportRowsPDF('Invoices', headers, rows);
+}
+
+// ============================================================
+// REPORTS ENGINE
+// ============================================================
+function onReportChange(){
+  state.reportType = document.getElementById('rep-type').value;
+  runReport();
+}
+function inRange(dateStr, from, to){
+  if(!dateStr) return true;
+  const d = new Date(dateStr);
+  if(from && d < new Date(from)) return false;
+  if(to){ const t = new Date(to); t.setHours(23,59,59); if(d > t) return false; }
+  return true;
+}
+function reportTitle(type){
+  return ({
+    payables:'Vendor-wise payables / pendency', itc:'GST / ITC hold register',
+    purchase:'Purchase register', paymentreg:'Payment register',
+    aging:'Aging report', gstcompliance:'Vendor GST compliance'
+  })[type] || 'Report';
+}
+async function runReport(){
+  const type = (document.getElementById('rep-type')||{}).value || state.reportType || 'payables';
+  state.reportType = type;
+  state.reportFrom = (document.getElementById('rep-from')||{}).value || '';
+  state.reportTo = (document.getElementById('rep-to')||{}).value || '';
+  const out = document.getElementById('report-output');
+  if(out) out.innerHTML = '<div class="card"><p class="muted">Running report…</p></div>';
+  const cid = state.company.id;
+  let headers = [], rows = [], summary = '', moneyCols = [];
+  const from = state.reportFrom, to = state.reportTo;
+
+  if(type==='payables'){
+    const { data: invs } = await sb.from('invoices').select('*, vendors(name)').eq('company_id',cid);
+    const byV = {};
+    (invs||[]).filter(i=>inRange(i.submitted_at, from, to)).forEach(i=>{
+      const k = i.vendor_id||'?'; const name = i.vendors?.name||'Unknown';
+      if(!byV[k]) byV[k]={name,billed:0,paid:0,held:0,due:0};
+      const total=Number(i.total_amount||0), paid=Number(i.amount_paid||0), held=totalHold(i);
+      byV[k].billed+=total; byV[k].paid+=paid; byV[k].held+=held; byV[k].due+=Math.max(0,total-paid-held);
+    });
+    headers=['Vendor','Billed','Paid','Held','Due'];
+    rows=Object.values(byV).sort((a,b)=>b.due-a.due).map(v=>[v.name,v.billed.toFixed(2),v.paid.toFixed(2),v.held.toFixed(2),v.due.toFixed(2)]);
+    summary=`Total due: ${fmtMoney(Object.values(byV).reduce((s,v)=>s+v.due,0))}`;
+    moneyCols = [1,2,3,4];
+  }
+  else if(type==='itc'){
+    const { data: invs } = await sb.from('invoices').select('*, vendors(name)').eq('company_id',cid);
+    const list = (invs||[]).filter(i=>inRange(i.submitted_at, from, to)).filter(i=>itcOnHold(i)>0 || (i.gstr2b_status && i.gstr2b_status!=='reflected' && Number(i.gst_amount)>0));
+    headers=['Invoice #','Vendor','Total','GST','2B status','ITC held'];
+    rows=list.map(i=>[i.invoice_number, i.vendors?.name||'', Number(i.total_amount).toFixed(2), Number(i.gst_amount||0).toFixed(2), (i.gstr2b_status||'pending'), itcOnHold(i).toFixed(2)]);
+    summary=`ITC at risk: ${fmtMoney(list.reduce((s,i)=>s+itcOnHold(i),0))} across ${list.length} invoice(s)`;
+    moneyCols=[2,3,5];
+  }
+  else if(type==='purchase'){
+    const { data: pos } = await sb.from('purchase_orders').select('*, vendors(name)').eq('company_id',cid);
+    const list = (pos||[]).filter(p=>inRange(p.created_at, from, to));
+    headers=['PO #','Vendor','Amount','Status','Created'];
+    rows=list.map(p=>[p.po_number, p.vendors?.name||'', Number(p.total_amount).toFixed(2), p.status, fmtDate(p.created_at)]);
+    summary=`${list.length} PO(s) · Total ${fmtMoney(list.reduce((s,p)=>s+Number(p.total_amount),0))}`;
+    moneyCols=[2];
+  }
+  else if(type==='paymentreg'){
+    const { data: pays } = await sb.from('payments').select('*, invoices(invoice_number), vendors(name)').eq('company_id',cid);
+    const list = (pays||[]).filter(p=>inRange(p.paid_on, from, to)).sort((a,b)=>new Date(b.paid_on)-new Date(a.paid_on));
+    headers=['Date','Vendor','Invoice #','Amount','Reference'];
+    rows=list.map(p=>[fmtDate(p.paid_on), p.vendors?.name||'', p.invoices?.invoice_number||'', Number(p.amount).toFixed(2), p.reference||'']);
+    summary=`${list.length} payment(s) · Total ${fmtMoney(list.reduce((s,p)=>s+Number(p.amount),0))}`;
+    moneyCols=[3];
+  }
+  else if(type==='aging'){
+    const { data: invs } = await sb.from('invoices').select('*, vendors(name)').eq('company_id',cid);
+    const now = new Date();
+    const buckets = {};
+    (invs||[]).filter(i=>inRange(i.submitted_at, from, to)).forEach(i=>{
+      const total=Number(i.total_amount||0), paid=Number(i.amount_paid||0), held=totalHold(i);
+      const due=Math.max(0,total-paid-held);
+      if(due<=0.01) return;
+      const days = Math.floor((now - new Date(i.submitted_at))/(1000*60*60*24));
+      const b = days<=30?'0-30':days<=60?'31-60':days<=90?'61-90':'90+';
+      const k = i.vendor_id||'?'; const name=i.vendors?.name||'Unknown';
+      if(!buckets[k]) buckets[k]={name,'0-30':0,'31-60':0,'61-90':0,'90+':0,total:0};
+      buckets[k][b]+=due; buckets[k].total+=due;
+    });
+    headers=['Vendor','0-30 days','31-60','61-90','90+','Total due'];
+    rows=Object.values(buckets).sort((a,b)=>b.total-a.total).map(v=>[v.name,v['0-30'].toFixed(2),v['31-60'].toFixed(2),v['61-90'].toFixed(2),v['90+'].toFixed(2),v.total.toFixed(2)]);
+    summary=`Total outstanding: ${fmtMoney(Object.values(buckets).reduce((s,v)=>s+v.total,0))}`;
+    moneyCols=[1,2,3,4,5];
+  }
+  else if(type==='gstcompliance'){
+    const { data: invs } = await sb.from('invoices').select('*, vendors(name)').eq('company_id',cid);
+    const byV = {};
+    (invs||[]).filter(i=>inRange(i.submitted_at, from, to)).forEach(i=>{
+      const k=i.vendor_id||'?'; const name=i.vendors?.name||'Unknown';
+      if(!byV[k]) byV[k]={name,total:0,reflected:0,notReflected:0,pending:0};
+      byV[k].total++;
+      const s=i.gstr2b_status||'pending';
+      if(s==='reflected') byV[k].reflected++; else if(s==='not_reflected') byV[k].notReflected++; else byV[k].pending++;
+    });
+    headers=['Vendor','Invoices','In 2B','Not in 2B','Pending','Compliance %'];
+    rows=Object.values(byV).sort((a,b)=>(a.reflected/a.total)-(b.reflected/b.total)).map(v=>[
+      v.name, v.total, v.reflected, v.notReflected, v.pending,
+      v.total? Math.round(100*v.reflected/v.total)+'%':'—'
+    ]);
+    summary=`${Object.keys(byV).length} vendor(s)`;
+  }
+
+  state.__reportData = { type, headers, rows, title: reportTitle(type), moneyCols };
+  renderReportTable(headers, rows, summary, reportTitle(type), moneyCols);
+}
+function renderReportTable(headers, rows, summary, title, moneyCols){
+  moneyCols = moneyCols || [];
+  const out = document.getElementById('report-output');
+  if(!out) return;
+  const fmtCell = (c, idx) => moneyCols.includes(idx) ? fmtMoney(c) : c;
+  out.innerHTML = `<div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+      <div><h3 style="margin:0;">${title}</h3><p class="muted" style="margin:2px 0 0;">${summary||''}${(state.reportFrom||state.reportTo)?` · ${state.reportFrom||'start'} to ${state.reportTo||'today'}`:''}</p></div>
+      <div style="display:flex;gap:6px;">
+        <button class="btn btn-sm" onclick="exportReport('csv')">CSV</button>
+        <button class="btn btn-sm" onclick="exportReport('xlsx')">Excel</button>
+        <button class="btn btn-sm" onclick="exportReport('pdf')">PDF</button>
+      </div>
+    </div>
+    ${buildFilterBar('rep-table', { search:true })}
+    <table id="rep-table" style="margin-top:6px;">
+      <tr>${headers.map(h=>`<th>${h}</th>`).join('')}</tr>
+      ${rows.map(r=>`<tr data-search="${r.join(' ').toLowerCase().replace(/"/g,'&quot;')}">${r.map((c,idx)=>`<td>${fmtCell(c,idx)}</td>`).join('')}</tr>`).join('') || `<tr><td colspan="${headers.length}" class="muted">No data for this period.</td></tr>`}
+    </table>
+  </div>`;
+}
+function exportReport(fmt){
+  const d = state.__reportData;
+  if(!d) return;
+  const fn = `${d.type}_${state.company.slug}`;
+  // export keeps raw numeric values (no ₹) for clean CSV/Excel; PDF can show formatted
+  if(fmt==='csv') exportRowsCSV(fn, d.headers, d.rows);
+  else if(fmt==='xlsx') exportRowsXLSX(fn, d.headers, d.rows, d.title.slice(0,28));
+  else {
+    const disp = d.rows.map(r=>r.map((c,idx)=>(d.moneyCols||[]).includes(idx)?fmtMoney(c):c));
+    exportRowsPDF(d.title, d.headers, disp);
+  }
 }
 
 // ---- PO creation ----
@@ -2575,7 +2752,8 @@ async function renderVendorApp(tab){
 
   let body = `<div class="tabs">
     ${!notActive ? `<div class="tab ${state.activeTab==='pos'?'active':''}" onclick="renderVendorApp('pos')">My Purchase Orders</div>
-    <div class="tab ${state.activeTab==='invoices'?'active':''}" onclick="renderVendorApp('invoices')">My Invoices</div>` : ''}
+    <div class="tab ${state.activeTab==='invoices'?'active':''}" onclick="renderVendorApp('invoices')">My Invoices</div>
+    <div class="tab ${state.activeTab==='reports'?'active':''}" onclick="renderVendorApp('reports')">Reports</div>` : ''}
     <div class="tab ${state.activeTab==='profile'?'active':''}" onclick="renderVendorApp('profile')">My Profile &amp; Documents</div>
   </div>`;
 
@@ -2590,6 +2768,13 @@ async function renderVendorApp(tab){
     body += renderVendorProfileForm();
     document.getElementById('root').innerHTML = shell(state.company.name, `${state.profile.name} · Vendor`, body);
     loadVendorDocLinks();
+    return;
+  }
+
+  if(state.activeTab === 'reports'){
+    body += renderVendorReports(vid);
+    document.getElementById('root').innerHTML = shell(state.company.name, `${state.profile.name} · Vendor`, body);
+    setTimeout(()=>runVendorReport(vid), 30);
     return;
   }
 
@@ -2632,6 +2817,54 @@ async function renderVendorApp(tab){
   }
 
   document.getElementById('root').innerHTML = shell(state.company.name, `${state.profile.name} · Vendor`, body);
+}
+
+function renderVendorReports(vid){
+  const rep = state.reportType || 'statement';
+  const opts = [['statement','Invoice statement'],['payments','Payments received'],['outstanding','Outstanding / due to me']];
+  return `<div class="card">
+    <h3 style="margin-top:0;">Reports</h3>
+    <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;">
+      <div class="fb-group" style="min-width:240px;"><span class="fb-label">Report</span>
+        <select id="vrep-type" onchange="onVendorReportChange()">${opts.map(([v,l])=>`<option value="${v}" ${rep===v?'selected':''}>${l}</option>`).join('')}</select></div>
+      <div class="fb-group"><span class="fb-label">From</span><input type="date" id="vrep-from" value="${state.reportFrom||''}"/></div>
+      <div class="fb-group"><span class="fb-label">To</span><input type="date" id="vrep-to" value="${state.reportTo||''}"/></div>
+      <button class="btn btn-primary" onclick="runVendorReport('${vid}')">Run report</button>
+    </div>
+  </div><div id="report-output"></div>`;
+}
+function onVendorReportChange(){ state.reportType = document.getElementById('vrep-type').value; }
+async function runVendorReport(vid){
+  const type = (document.getElementById('vrep-type')||{}).value || state.reportType || 'statement';
+  state.reportType = type;
+  state.reportFrom = (document.getElementById('vrep-from')||{}).value || '';
+  state.reportTo = (document.getElementById('vrep-to')||{}).value || '';
+  const from = state.reportFrom, to = state.reportTo;
+  let headers=[], rows=[], summary='', moneyCols=[], title='';
+  if(type==='statement'){
+    const { data: invs } = await sb.from('invoices').select('*, purchase_orders(po_number)').eq('vendor_id',vid);
+    const list=(invs||[]).filter(i=>inRange(i.submitted_at,from,to)).sort((a,b)=>new Date(b.submitted_at)-new Date(a.submitted_at));
+    headers=['Invoice #','PO','Total','Paid','Held','Due','Status','Date'];
+    rows=list.map(i=>{const t=Number(i.total_amount||0),p=Number(i.amount_paid||0),h=totalHold(i);return [i.invoice_number,i.purchase_orders?.po_number||'',t.toFixed(2),p.toFixed(2),h.toFixed(2),Math.max(0,t-p-h).toFixed(2),i.status,fmtDate(i.submitted_at)];});
+    moneyCols=[2,3,4,5]; title='Invoice statement';
+    summary=`${list.length} invoice(s)`;
+  } else if(type==='payments'){
+    const { data: pays } = await sb.from('payments').select('*, invoices(invoice_number)').eq('vendor_id',vid);
+    const list=(pays||[]).filter(p=>inRange(p.paid_on,from,to)).sort((a,b)=>new Date(b.paid_on)-new Date(a.paid_on));
+    headers=['Date','Invoice #','Amount','Reference'];
+    rows=list.map(p=>[fmtDate(p.paid_on),p.invoices?.invoice_number||'',Number(p.amount).toFixed(2),p.reference||'']);
+    moneyCols=[2]; title='Payments received';
+    summary=`Total received: ${fmtMoney(list.reduce((s,p)=>s+Number(p.amount),0))}`;
+  } else {
+    const { data: invs } = await sb.from('invoices').select('*, purchase_orders(po_number)').eq('vendor_id',vid);
+    const list=(invs||[]).filter(i=>inRange(i.submitted_at,from,to)).map(i=>{const t=Number(i.total_amount||0),p=Number(i.amount_paid||0),h=totalHold(i);return {...i,_due:Math.max(0,t-p-h),_held:h};}).filter(x=>x._due>0.01);
+    headers=['Invoice #','PO','Due','Held','Hold reason','Date'];
+    rows=list.map(x=>[x.invoice_number,x.purchase_orders?.po_number||'',x._due.toFixed(2),x._held.toFixed(2),x.manual_hold_reason||(itcOnHold(x)>0?'GST awaiting GSTR-2B':''),fmtDate(x.submitted_at)]);
+    moneyCols=[2,3]; title='Outstanding / due to me';
+    summary=`Total outstanding: ${fmtMoney(list.reduce((s,x)=>s+x._due,0))}`;
+  }
+  state.__reportData={type,headers,rows,title,moneyCols};
+  renderReportTable(headers, rows, summary, title, moneyCols);
 }
 
 function openUploadInvoiceModal(poId, poNumber){
