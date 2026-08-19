@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Kiyra — PO & Vendor Invoice Management</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <style>
   /* ============================================================
      Kiyra — "Modern Ledger" design system
@@ -372,9 +373,8 @@ function gstr2bBadge(status){
   return `<span class="badge badge-${map[s]}">${label[s]}</span>`;
 }
 // GST amount considered "on hold" — the unpaid balance when not reflected in 2B.
-// If the invoice is reflected in 2B, nothing is held.
-// Otherwise the held amount is the still-unpaid balance, capped at the GST amount
-// (you may have paid the taxable value and be holding just the GST).
+// If the invoice is reflected in 2B, nothing is held on GST grounds.
+// Otherwise the held amount is the still-unpaid balance, capped at the GST amount.
 function itcOnHold(inv){
   const st = inv.gstr2b_status || 'pending';
   if(st === 'reflected') return 0;
@@ -382,8 +382,15 @@ function itcOnHold(inv){
   const total = Number(inv.total_amount || 0);
   const paid = Number(inv.amount_paid || 0);
   const balance = Math.max(0, total - paid);
-  // hold is whichever is smaller: the outstanding balance, or the GST amount
   return gst > 0 ? Math.min(balance, gst) : 0;
+}
+// discretionary hold the company placed for any other reason
+function manualHold(inv){
+  return Number(inv.manual_hold_amount || 0);
+}
+// total amount held on this invoice (GST/2B hold + manual hold)
+function totalHold(inv){
+  return itcOnHold(inv) + manualHold(inv);
 }
 async function logActivity(companyId, action, entityType, entityId, details){
   try{
@@ -449,7 +456,10 @@ async function resolveRole(){
   const errors = [];
 
   // Restore the tab the user was on before a refresh (from the URL hash).
-  const hashTab = (location.hash || '').replace('#','').trim() || null;
+  // Restore the tab the user was on before a refresh (hash first, then sessionStorage backup).
+  let hashTab = (location.hash || '').replace('#','').trim() || null;
+  if(hashTab && hashTab.includes('=')) hashTab = null; // ignore auth tokens like access_token=...
+  if(!hashTab){ try { hashTab = sessionStorage.getItem('kiyra_tab') || null; } catch(e){} }
 
   let { data: sa, error: saErr } = await sb.from('superadmins').select('*').eq('auth_user_id', uid).maybeSingle();
   if(saErr) errors.push('superadmins: '+saErr.message);
@@ -820,12 +830,12 @@ async function updateApprovalLevels(id){
 // ============================================================
 async function renderCompanyApp(tab){
   state.activeTab = tab || state.activeTab || 'dashboard';
-  // Persist the active tab in the URL so a refresh stays on the same page.
-  try { history.replaceState(null, '', '#' + state.activeTab); } catch(e){}
+  // Persist the active tab so a refresh stays on the same page.
+  try { history.replaceState(null, '', '#' + state.activeTab); sessionStorage.setItem('kiyra_tab', state.activeTab); } catch(e){}
   const cid = state.company.id;
   const isAdmin = state.role === 'company_admin';
 
-  let tabs = [['dashboard','Dashboard'],['pos','Purchase Orders'],['invoices','Invoices / Approvals'],['vendors','Vendors']];
+  let tabs = [['dashboard','Dashboard'],['pos','Purchase Orders'],['invoices','Invoices / Approvals'],['payables','Payables'],['payments','Payments'],['vendors','Vendors']];
   if(isAdmin) tabs.push(['users','Team']);
   if(isAdmin) tabs.push(['settings','Settings']);
 
@@ -833,7 +843,7 @@ async function renderCompanyApp(tab){
 
   if(state.activeTab === 'dashboard'){
     const { data: pos } = await sb.from('purchase_orders').select('id,status,total_amount,created_at,vendor_id,vendors(name)').eq('company_id',cid);
-    const { data: invs } = await sb.from('invoices').select('id,status,total_amount,submitted_at,vendor_id,gstr2b_status,gst_amount,amount_paid').eq('company_id',cid);
+    const { data: invs } = await sb.from('invoices').select('id,status,total_amount,submitted_at,vendor_id,gstr2b_status,gst_amount,amount_paid,manual_hold_amount').eq('company_id',cid);
     const { data: vendors } = await sb.from('vendors').select('id,name,status').eq('company_id',cid);
     const p = state.plan || {};
     const uCount = await countRows('company_users');
@@ -844,7 +854,7 @@ async function renderCompanyApp(tab){
     const paidInv = invList.filter(i=>i.status==='paid');
     const approvedValue = approvedInv.reduce((s,i)=>s+Number(i.total_amount),0);
     const paidValue = paidInv.reduce((s,i)=>s+Number(i.total_amount),0);
-    const itcHoldTotal = invList.reduce((s,i)=>s+itcOnHold(i),0);
+    const itcHoldTotal = invList.reduce((s,i)=>s+totalHold(i),0);
     const poValue = poList.reduce((s,i)=>s+Number(i.total_amount),0);
     const activeVendors = vList.filter(v=>v.status==='active').length;
     const pendingVendors = vList.filter(v=>v.status==='pending').length;
@@ -1012,17 +1022,21 @@ async function renderCompanyApp(tab){
   else if(state.activeTab === 'invoices'){
     const { data: invs, error: invErr } = await sb.from('invoices').select('*, vendors(name), purchase_orders(*)').eq('company_id',cid).order('submitted_at',{ascending:false});
     window.__invoicesForExport = invs || [];
-    const totalHold = (invs||[]).reduce((s,i)=>s+itcOnHold(i),0);
+    const totalHoldSum = (invs||[]).reduce((s,i)=>s+totalHold(i),0);
     const invVendors = [...new Set((invs||[]).map(i=>i.vendors?.name).filter(Boolean))];
     const invStatuses = [...new Set((invs||[]).map(i=>i.status).filter(Boolean))];
-    const holdBanner = totalHold > 0
+    const holdBanner = totalHoldSum > 0
       ? `<div style="background:#f8eded;border:1px solid #e4c4c4;border-radius:10px;padding:12px 14px;margin:6px 0;font-size:13.5px;color:#8a2b2b;">
-          <strong>⚠ ITC at risk:</strong> ${fmtMoney(totalHold)} of GST is on hold across invoices not yet reflected in GSTR-2B. Release once the vendor files and the invoice appears in your 2B.
+          <strong>⚠ On hold:</strong> ${fmtMoney(totalHoldSum)} is currently held across invoices — GST awaiting GSTR-2B reflection and any manual holds. Vendors can see the held amount and reason on their side.
         </div>` : '';
     body += `<div class="card">
       <div style="display:flex;justify-content:space-between;align-items:center;">
         <h3 style="margin:0;">Invoices</h3>
-        <button class="btn btn-sm" onclick="exportInvoicesCSV()">Export CSV</button>
+        <div style="display:flex;gap:6px;">
+          <button class="btn btn-sm" onclick="exportInvoices('csv')">CSV</button>
+          <button class="btn btn-sm" onclick="exportInvoices('xlsx')">Excel</button>
+          <button class="btn btn-sm" onclick="exportInvoices('pdf')">PDF</button>
+        </div>
       </div>
       ${invErr ? `<p style="color:var(--red);">Couldn't load invoices: ${invErr.message}</p>` : ''}
       ${holdBanner}
@@ -1042,16 +1056,104 @@ async function renderCompanyApp(tab){
           return `<tr data-vendor="${(i.vendors?.name||'').replace(/"/g,'&quot;')}" data-status="${i.status}" data-gst2b="${st2b}" data-amount="${i.total_amount}" data-search="${(i.invoice_number+' '+(i.vendors?.name||'')+' '+(i.purchase_orders?.po_number||'')+' '+i.status).toLowerCase().replace(/"/g,'&quot;')}">
           <td>${i.invoice_number}</td><td>${i.vendors?.name||''}</td><td>${i.purchase_orders?.po_number||'—'}</td>
           <td>${fmtMoney(i.total_amount)}${Number(i.amount_paid)>0 && Number(i.amount_paid)<Number(i.total_amount)?`<div class="muted">paid ${fmtMoney(i.amount_paid)}, bal ${fmtMoney(Number(i.total_amount)-Number(i.amount_paid))}</div>`:''}</td>
-          <td>${Number(i.gst_amount)>0?fmtMoney(i.gst_amount):'—'}${hold>0?`<div class="muted" style="color:#b23b3b;">${fmtMoney(hold)} on hold</div>`:''}</td>
+          <td>${Number(i.gst_amount)>0?fmtMoney(i.gst_amount):'—'}${hold>0?`<div class="muted" style="color:#b23b3b;">${fmtMoney(hold)} GST held</div>`:''}${manualHold(i)>0?`<div class="muted" style="color:#b23b3b;">${fmtMoney(manualHold(i))} held: ${(i.manual_hold_reason||'other').slice(0,24)}</div>`:''}</td>
           <td>${gstr2bBadge(st2b)}</td>
           <td>${matchBadge(m.status)}</td>
           <td>${badge(i.status)}${i.status==='paid'&&i.payment_reference?`<div class="muted">Ref: ${i.payment_reference}</div>`:''}</td><td class="muted">${fmtDate(i.submitted_at)}</td>
           <td class="row-actions">
             <button class="btn btn-sm" onclick='openInvoiceModal(${JSON.stringify(i.id)})'>Review</button>
             ${isAdmin ? `<button class="btn btn-sm" onclick='openGstr2bModal(${JSON.stringify(i.id)})'>2B</button>` : ''}
-            ${isAdmin && i.status==='approved' ? `<button class="btn btn-sm btn-green" onclick='markInvoicePaid(${JSON.stringify(i.id)})'>Mark paid</button>` : ''}
+            ${isAdmin ? `<button class="btn btn-sm" onclick='openHoldModal(${JSON.stringify(i.id)})'>Hold</button>` : ''}
+            ${isAdmin && (i.status==='approved') ? `<button class="btn btn-sm btn-green" onclick='markInvoicePaid(${JSON.stringify(i.id)})'>Pay</button>` : ''}
           </td>
         </tr>`;}).join('') || `<tr><td colspan="10" class="muted">${invErr ? '' : 'No invoices submitted yet.'}</td></tr>`}
+      </table>
+    </div>`;
+  }
+
+  else if(state.activeTab === 'payables'){
+    // Vendor-wise pendency: for each vendor, total billed vs paid vs held vs due.
+    const { data: invs } = await sb.from('invoices').select('*, vendors(name)').eq('company_id',cid);
+    const byVendor = {};
+    (invs||[]).forEach(i=>{
+      const vid = i.vendor_id || 'unknown';
+      const name = i.vendors?.name || 'Unknown vendor';
+      if(!byVendor[vid]) byVendor[vid] = { name, billed:0, paid:0, held:0, due:0, count:0, pending:0 };
+      const total = Number(i.total_amount||0);
+      const paid = Number(i.amount_paid||0);
+      const held = totalHold(i);
+      const due = Math.max(0, total - paid - held);
+      byVendor[vid].billed += total;
+      byVendor[vid].paid += paid;
+      byVendor[vid].held += held;
+      byVendor[vid].due += due;
+      byVendor[vid].count += 1;
+      if(due > 0.01) byVendor[vid].pending += 1;
+    });
+    const rows = Object.entries(byVendor).map(([vid,v])=>({vid,...v})).sort((a,b)=>b.due-a.due);
+    window.__payablesForExport = rows;
+    const grandDue = rows.reduce((s,r)=>s+r.due,0);
+    const grandHeld = rows.reduce((s,r)=>s+r.held,0);
+    body += `
+    <div class="grid grid-3" style="margin-bottom:16px;">
+      <div class="kpi red"><div class="kpi-accent"></div><div class="kpi-label">Total due to vendors</div><div class="kpi-value">${fmtMoney(grandDue)}</div><div class="kpi-sub">across ${rows.filter(r=>r.due>0.01).length} vendor(s)</div></div>
+      <div class="kpi amber"><div class="kpi-accent"></div><div class="kpi-label">Total on hold</div><div class="kpi-value">${fmtMoney(grandHeld)}</div><div class="kpi-sub">GST + manual holds</div></div>
+      <div class="kpi"><div class="kpi-accent"></div><div class="kpi-label">Total paid</div><div class="kpi-value">${fmtMoney(rows.reduce((s,r)=>s+r.paid,0))}</div><div class="kpi-sub">settled to date</div></div>
+    </div>
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <h3 style="margin:0;">Payables by vendor</h3>
+        <div style="display:flex;gap:6px;">
+          <button class="btn btn-sm" onclick="exportPayables('csv')">CSV</button>
+          <button class="btn btn-sm" onclick="exportPayables('xlsx')">Excel</button>
+          <button class="btn btn-sm" onclick="exportPayables('pdf')">PDF</button>
+        </div>
+      </div>
+      <p class="muted" style="margin:6px 0;">Click a vendor's "Due" amount to see exactly which invoices make it up.</p>
+      ${buildFilterBar('pay-table', { search:true, amount:false })}
+      <table id="pay-table" style="margin-top:6px;">
+        <tr><th>Vendor</th><th>Invoices</th><th>Billed</th><th>Paid</th><th>Held</th><th>Due</th><th></th></tr>
+        ${rows.map(r=>`<tr data-search="${r.name.toLowerCase().replace(/"/g,'&quot;')}">
+          <td style="font-weight:500;">${r.name}</td>
+          <td>${r.count} ${r.pending?`<span class="muted">(${r.pending} pending)</span>`:''}</td>
+          <td>${fmtMoney(r.billed)}</td>
+          <td>${fmtMoney(r.paid)}</td>
+          <td>${r.held>0?`<span style="color:#b23b3b;">${fmtMoney(r.held)}</span>`:'—'}</td>
+          <td>${r.due>0.01?`<a href="#" onclick='showVendorPending(${JSON.stringify(r.vid)},${JSON.stringify(r.name)});return false;' style="font-weight:600;">${fmtMoney(r.due)}</a>`:'<span class="muted">Clear</span>'}</td>
+          <td class="row-actions">${r.due>0.01?`<button class="btn btn-sm" onclick='showVendorPending(${JSON.stringify(r.vid)},${JSON.stringify(r.name)})'>View pending</button>`:''}</td>
+        </tr>`).join('') || '<tr><td colspan="7" class="muted">No invoices yet.</td></tr>'}
+      </table>
+    </div>`;
+  }
+
+  else if(state.activeTab === 'payments'){
+    const { data: pays } = await sb.from('payments').select('*, invoices(invoice_number), vendors(name)').eq('company_id',cid).order('paid_on',{ascending:false});
+    window.__paymentsForExport = pays || [];
+    const payVendors = [...new Set((pays||[]).map(p=>p.vendors?.name).filter(Boolean))];
+    const totalPaid = (pays||[]).reduce((s,p)=>s+Number(p.amount),0);
+    body += `
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <h3 style="margin:0;">Payment history</h3>
+        <div style="display:flex;gap:6px;">
+          <button class="btn btn-sm" onclick="exportPayments('csv')">CSV</button>
+          <button class="btn btn-sm" onclick="exportPayments('xlsx')">Excel</button>
+          <button class="btn btn-sm" onclick="exportPayments('pdf')">PDF</button>
+        </div>
+      </div>
+      <p class="muted" style="margin:6px 0;">Total paid: <strong>${fmtMoney(totalPaid)}</strong> across ${(pays||[]).length} payment(s)</p>
+      ${buildFilterBar('pmt-table', { search:true, amount:true, selects:[
+        {key:'vendor', label:'Vendor', options: payVendors}
+      ]})}
+      <table id="pmt-table" style="margin-top:6px;">
+        <tr><th>Date</th><th>Vendor</th><th>Invoice #</th><th>Amount</th><th>Reference</th></tr>
+        ${(pays||[]).map(p=>`<tr data-vendor="${(p.vendors?.name||'').replace(/"/g,'&quot;')}" data-amount="${p.amount}" data-search="${((p.vendors?.name||'')+' '+(p.invoices?.invoice_number||'')+' '+(p.reference||'')).toLowerCase().replace(/"/g,'&quot;')}">
+          <td>${fmtDate(p.paid_on)}</td>
+          <td>${p.vendors?.name||'—'}</td>
+          <td>${p.invoices?.invoice_number||'—'}</td>
+          <td style="font-weight:500;">${fmtMoney(p.amount)}</td>
+          <td class="muted">${p.reference||'—'}</td>
+        </tr>`).join('') || '<tr><td colspan="5" class="muted">No payments recorded yet.</td></tr>'}
       </table>
     </div>`;
   }
@@ -1282,6 +1384,8 @@ async function markInvoicePaid(id){
       <button class="btn btn-sm" onclick="document.getElementById('pay-amount').value='${(taxable-alreadyPaid).toFixed(2)}'">Taxable only</button>
       <button class="btn btn-sm" onclick="document.getElementById('pay-amount').value='${(total-alreadyPaid).toFixed(2)}'">Full amount</button>
     </div>
+    <label style="display:block;margin-top:10px;">Payment date</label>
+    <input id="pay-date" type="date" value="${new Date().toISOString().slice(0,10)}"/>
     <label style="display:block;margin-top:10px;">Payment reference (UTR / cheque no.) — optional</label>
     <input id="pay-ref" type="text"/>
     <button class="btn btn-primary" style="width:100%;margin-top:14px;" onclick="confirmPayment('${id}')">Record payment</button>
@@ -1290,11 +1394,20 @@ async function markInvoicePaid(id){
 async function confirmPayment(id){
   const payNow = parseFloat(document.getElementById('pay-amount').value)||0;
   const ref = document.getElementById('pay-ref').value.trim() || null;
-  const { data: i } = await sb.from('invoices').select('total_amount, amount_paid').eq('id', id).single();
+  const dateEl = document.getElementById('pay-date');
+  const paidOn = dateEl && dateEl.value ? dateEl.value : new Date().toISOString().slice(0,10);
+  if(payNow <= 0){ toast('Enter an amount greater than zero', true); return; }
+  const { data: i } = await sb.from('invoices').select('total_amount, amount_paid, vendor_id').eq('id', id).single();
   const total = Number(i.total_amount);
   const newPaid = Number(i.amount_paid||0) + payNow;
-  // fully paid only when the whole invoice is settled; otherwise it stays approved with a balance
   const fullyPaid = newPaid >= total - 0.01;
+  // 1. record the dated payment in the payments log
+  const { error: payErr } = await sb.from('payments').insert({
+    company_id: state.company.id, invoice_id: id, vendor_id: i.vendor_id,
+    amount: payNow, paid_on: paidOn, reference: ref
+  });
+  if(payErr){ toast('Could not record payment: '+payErr.message, true); return; }
+  // 2. update the invoice running total + status
   const patch = {
     amount_paid: newPaid,
     payment_reference: ref,
@@ -1303,9 +1416,9 @@ async function confirmPayment(id){
   };
   const { error } = await sb.from('invoices').update(patch).eq('id', id);
   if(error){ toast(error.message, true); return; }
-  await logActivity(state.company.id, fullyPaid?'invoice_paid':'invoice_part_paid', 'invoice', id, {payNow, ref});
+  await logActivity(state.company.id, fullyPaid?'invoice_paid':'invoice_part_paid', 'invoice', id, {payNow, ref, paidOn});
   closeModal();
-  toast(fullyPaid ? 'Invoice fully paid' : `Part payment recorded · balance ${fmtMoney(total-newPaid)} held`);
+  toast(fullyPaid ? 'Invoice fully paid' : `Part payment recorded · balance ${fmtMoney(total-newPaid)}`);
   renderCompanyApp('invoices');
 }
 
@@ -1354,6 +1467,73 @@ async function saveGstr2b(id){
   closeModal(); toast('2B status saved'); renderCompanyApp('invoices');
 }
 
+// ---- Manual hold modal (company places a discretionary hold, visible to vendor) ----
+async function openHoldModal(id){
+  const { data: i, error } = await sb.from('invoices').select('*, vendors(name)').eq('id', id).single();
+  if(error){ toast(error.message, true); return; }
+  showModal(`
+    <span class="close-x" onclick="closeModal()">✕</span>
+    <h3>Place / update hold</h3>
+    <p class="muted">Invoice ${i.invoice_number} · ${i.vendors?.name||''}</p>
+    <p style="font-size:13px;color:var(--ink-soft);">Hold part of this invoice for any reason (quality issue, dispute, pending documents, short supply, etc.). The amount and reason are shown to the vendor. This is separate from the automatic GST/2B hold.</p>
+    <label style="display:block;margin-top:8px;">Hold amount (₹)</label>
+    <input id="hold-amt" type="number" step="0.01" value="${i.manual_hold_amount||0}"/>
+    <label style="display:block;margin-top:10px;">Reason (shown to vendor)</label>
+    <textarea id="hold-reason" rows="2" placeholder="e.g. 5% retention till delivery confirmed">${i.manual_hold_reason||''}</textarea>
+    <div style="display:flex;gap:8px;margin-top:14px;">
+      <button class="btn btn-primary" style="flex:1;" onclick="saveHold('${id}')">Save hold</button>
+      ${Number(i.manual_hold_amount)>0?`<button class="btn btn-danger" onclick="releaseHold('${id}')">Release hold</button>`:''}
+    </div>
+  `);
+}
+async function saveHold(id){
+  const amt = parseFloat(document.getElementById('hold-amt').value) || 0;
+  const reason = document.getElementById('hold-reason').value.trim() || null;
+  const { error } = await sb.from('invoices').update({ manual_hold_amount: amt, manual_hold_reason: amt>0?reason:null }).eq('id', id);
+  if(error){ toast(error.message, true); return; }
+  await logActivity(state.company.id, 'invoice_hold_set', 'invoice', id, {amt, reason});
+  closeModal(); toast(amt>0?`Hold of ${fmtMoney(amt)} placed`:'Hold cleared'); renderCompanyApp('invoices');
+}
+async function releaseHold(id){
+  const { error } = await sb.from('invoices').update({ manual_hold_amount: 0, manual_hold_reason: null }).eq('id', id);
+  if(error){ toast(error.message, true); return; }
+  await logActivity(state.company.id, 'invoice_hold_released', 'invoice', id, {});
+  closeModal(); toast('Hold released'); renderCompanyApp('invoices');
+}
+
+// ---- Vendor pending drill-down ----
+async function showVendorPending(vid, name){
+  const { data: invs } = await sb.from('invoices').select('*, purchase_orders(po_number)').eq('company_id', state.company.id).eq('vendor_id', vid);
+  const pending = (invs||[]).map(i=>{
+    const total = Number(i.total_amount||0);
+    const paid = Number(i.amount_paid||0);
+    const held = totalHold(i);
+    const due = Math.max(0, total - paid - held);
+    return {...i, _due:due, _paid:paid, _held:held};
+  }).filter(x=>x._due > 0.01).sort((a,b)=>new Date(a.submitted_at)-new Date(b.submitted_at));
+  const totalDue = pending.reduce((s,x)=>s+x._due,0);
+  showModal(`
+    <span class="close-x" onclick="closeModal()">✕</span>
+    <h3>Pending invoices — ${name}</h3>
+    <p class="muted">${fmtMoney(totalDue)} due across ${pending.length} invoice(s)</p>
+    <table style="font-size:13px;margin-top:8px;">
+      <tr><th>Invoice #</th><th>PO</th><th>Total</th><th>Paid</th><th>Held</th><th>Due</th><th></th></tr>
+      ${pending.map(x=>`<tr>
+        <td>${x.invoice_number}</td><td>${x.purchase_orders?.po_number||'—'}</td>
+        <td>${fmtMoney(x.total_amount)}</td><td>${x._paid>0?fmtMoney(x._paid):'—'}</td>
+        <td>${x._held>0?`<span style="color:#b23b3b;">${fmtMoney(x._held)}</span>`:'—'}</td>
+        <td style="font-weight:600;">${fmtMoney(x._due)}</td>
+        <td>${state.role==='company_admin'?`<button class="btn btn-sm btn-green" onclick='closeModal();markInvoicePaid(${JSON.stringify(x.id)})'>Pay</button>`:''}</td>
+      </tr>`).join('')}
+    </table>
+    <div style="display:flex;gap:6px;margin-top:14px;">
+      <button class="btn btn-sm" onclick='exportVendorPending(${JSON.stringify(name)}, "csv")'>Export CSV</button>
+      <button class="btn btn-sm" onclick='exportVendorPending(${JSON.stringify(name)}, "pdf")'>Export PDF</button>
+    </div>
+  `);
+  window.__vendorPendingExport = { name, rows: pending };
+}
+
 // ---- CSV export ----
 function exportInvoicesCSV(){
   const rows = window.__invoicesForExport || [];
@@ -1367,6 +1547,80 @@ function exportInvoicesCSV(){
   const a = document.createElement('a');
   a.href = url; a.download = `invoices_${state.company.slug}.csv`; a.click();
   URL.revokeObjectURL(url);
+}
+
+// ============================================================
+// UNIVERSAL EXPORT HELPERS — CSV, Excel (xlsx), PDF
+// Each takes: filename, an array of header strings, and an array
+// of row arrays (values in the same order as headers).
+// ============================================================
+function exportRowsCSV(filename, headers, rows){
+  const esc = v => `"${String(v==null?'':v).replace(/"/g,'""')}"`;
+  const lines = [headers.map(esc).join(',')].concat(rows.map(r=>r.map(esc).join(',')));
+  const blob = new Blob([lines.join('\n')], {type:'text/csv'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = filename+'.csv'; a.click();
+  URL.revokeObjectURL(url);
+}
+function exportRowsXLSX(filename, headers, rows, sheetName){
+  if(typeof XLSX === 'undefined'){ toast('Excel library still loading — try again in a moment', true); return; }
+  const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, (sheetName||'Sheet1').slice(0,31));
+  XLSX.writeFile(wb, filename+'.xlsx');
+}
+function exportRowsPDF(title, headers, rows){
+  // Uses a print window styled as a simple report -> browser "Save as PDF".
+  const w = window.open('', '_blank');
+  const th = headers.map(h=>`<th style="text-align:left;border-bottom:2px solid #16202e;padding:6px 8px;font-size:11px;text-transform:uppercase;">${h}</th>`).join('');
+  const trs = rows.map(r=>`<tr>${r.map(c=>`<td style="border-bottom:1px solid #ddd;padding:6px 8px;font-size:12px;">${c==null?'':c}</td>`).join('')}</tr>`).join('');
+  w.document.write(`<html><head><title>${title}</title></head><body style="font-family:Arial,sans-serif;padding:24px;">
+    <h2 style="color:#0f6f5c;margin:0 0 4px;">Kiyra</h2>
+    <div style="font-size:16px;font-weight:bold;margin-bottom:2px;">${title}</div>
+    <div style="font-size:12px;color:#666;margin-bottom:14px;">${state.company.name} · Generated ${new Date().toLocaleDateString('en-IN')}</div>
+    <table style="width:100%;border-collapse:collapse;"><thead><tr>${th}</tr></thead><tbody>${trs}</tbody></table>
+    <script>window.onload=function(){window.print();}<\/script>
+  </body></html>`);
+  w.document.close();
+}
+
+function exportPayables(fmt){
+  const rows = (window.__payablesForExport||[]).map(r=>[r.name, r.count, r.billed.toFixed(2), r.paid.toFixed(2), r.held.toFixed(2), r.due.toFixed(2)]);
+  const headers = ['Vendor','Invoices','Billed','Paid','Held','Due'];
+  const fn = `payables_${state.company.slug}`;
+  if(fmt==='csv') exportRowsCSV(fn, headers, rows);
+  else if(fmt==='xlsx') exportRowsXLSX(fn, headers, rows, 'Payables');
+  else exportRowsPDF('Payables by vendor', headers, rows);
+}
+function exportPayments(fmt){
+  const rows = (window.__paymentsForExport||[]).map(p=>[fmtDate(p.paid_on), p.vendors?.name||'', p.invoices?.invoice_number||'', Number(p.amount).toFixed(2), p.reference||'']);
+  const headers = ['Date','Vendor','Invoice #','Amount','Reference'];
+  const fn = `payments_${state.company.slug}`;
+  if(fmt==='csv') exportRowsCSV(fn, headers, rows);
+  else if(fmt==='xlsx') exportRowsXLSX(fn, headers, rows, 'Payments');
+  else exportRowsPDF('Payment history', headers, rows);
+}
+function exportVendorPending(name, fmt){
+  const d = window.__vendorPendingExport;
+  if(!d) return;
+  const rows = d.rows.map(x=>[x.invoice_number, x.purchase_orders?.po_number||'', Number(x.total_amount).toFixed(2), Number(x._paid).toFixed(2), Number(x._held).toFixed(2), Number(x._due).toFixed(2)]);
+  const headers = ['Invoice #','PO','Total','Paid','Held','Due'];
+  const fn = `pending_${name.replace(/[^a-z0-9]/gi,'_')}`;
+  if(fmt==='csv') exportRowsCSV(fn, headers, rows);
+  else exportRowsPDF('Pending invoices — '+name, headers, rows);
+}
+function exportInvoices(fmt){
+  const rows = (window.__invoicesForExport||[]).map(i=>[
+    i.invoice_number, i.vendors?.name||'', i.purchase_orders?.po_number||'',
+    Number(i.total_amount).toFixed(2), Number(i.gst_amount||0).toFixed(2),
+    Number(i.amount_paid||0).toFixed(2), totalHold(i).toFixed(2),
+    (i.gstr2b_status||'pending'), i.status, fmtDate(i.submitted_at), i.payment_reference||''
+  ]);
+  const headers = ['Invoice #','Vendor','PO','Total','GST','Paid','Held','GSTR-2B','Status','Submitted','Payment Ref'];
+  const fn = `invoices_${state.company.slug}`;
+  if(fmt==='csv') exportRowsCSV(fn, headers, rows);
+  else if(fmt==='xlsx') exportRowsXLSX(fn, headers, rows, 'Invoices');
+  else exportRowsPDF('Invoices', headers, rows);
 }
 
 // ---- PO creation ----
@@ -2351,13 +2605,28 @@ async function renderVendorApp(tab){
     </div>`;
   } else {
     const { data: invs } = await sb.from('invoices').select('*, purchase_orders(po_number)').eq('vendor_id',vid).order('submitted_at',{ascending:false});
+    const totalHeld = (invs||[]).reduce((s,i)=>s+totalHold(i),0);
+    const heldBanner = totalHeld > 0
+      ? `<div style="background:#f7efe0;border:1px solid #e8d5b0;border-radius:10px;padding:12px 14px;margin-bottom:12px;font-size:13.5px;color:#8a6420;">
+          <strong>${fmtMoney(totalHeld)} currently on hold</strong> across your invoices. See the "Held" column for the amount and reason on each. GST amounts are typically released once your invoice reflects in the buyer's GSTR-2B (i.e. after you file your GSTR-1).
+        </div>` : '';
     body += `<div class="card"><h3 style="margin-top:0;">My submitted invoices</h3>
-      <table><tr><th>Invoice #</th><th>PO</th><th>Amount</th><th>Status</th><th>Submitted</th></tr>
-      ${(invs||[]).map(i=>`<tr>
+      ${heldBanner}
+      <table><tr><th>Invoice #</th><th>PO</th><th>Amount</th><th>Paid</th><th>Held</th><th>Status</th><th>Submitted</th></tr>
+      ${(invs||[]).map(i=>{
+        const gstHold = itcOnHold(i);
+        const mHold = manualHold(i);
+        const paid = Number(i.amount_paid||0);
+        const heldParts = [];
+        if(gstHold>0) heldParts.push(`${fmtMoney(gstHold)} <span class="muted">(GST — awaiting GSTR-2B)</span>`);
+        if(mHold>0) heldParts.push(`${fmtMoney(mHold)} <span class="muted">(${i.manual_hold_reason||'on hold'})</span>`);
+        return `<tr>
         <td>${i.invoice_number}</td><td>${i.purchase_orders?.po_number||''}</td><td>${fmtMoney(i.total_amount)}</td>
+        <td>${paid>0?fmtMoney(paid):'—'}</td>
+        <td>${heldParts.length?heldParts.join('<br>'):'—'}</td>
         <td>${badge(i.status)}${i.status==='rejected'&&i.rejection_reason?`<div class="muted">${i.rejection_reason}</div>`:''}</td>
         <td class="muted">${fmtDate(i.submitted_at)}</td>
-      </tr>`).join('') || '<tr><td colspan="5" class="muted">No invoices submitted yet.</td></tr>'}
+      </tr>`;}).join('') || '<tr><td colspan="7" class="muted">No invoices submitted yet.</td></tr>'}
       </table>
     </div>`;
   }
