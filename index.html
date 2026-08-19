@@ -8,37 +8,37 @@
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <style>
   /* ============================================================
-     Kiyra — modern SaaS dashboard
-     Vibrant indigo/violet, clean white cards, soft shadows,
-     rounded corners, light polish. Zoho/Freshworks family.
+     Kiyra — professional SaaS dashboard
+     Corporate blue, clean white cards, restrained accents.
+     Trustworthy, calm, built for finance teams.
      ============================================================ */
   @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&family=Inter:wght@400;500;600;700&display=swap');
   :root{
-    --bg:#f6f7fb;            /* cool light grey */
+    --bg:#f4f6f9;            /* cool light grey */
     --card:#ffffff;
-    --border:#e7e9f2;
-    --border-strong:#d5d8e6;
-    --ink:#1a1d2e;           /* near-navy text */
-    --ink-soft:#6b7186;
-    --text:#1a1d2e;
-    --muted:#8990a5;
-    --primary:#5b5bd6;       /* vibrant indigo */
-    --primary-dark:#4a48c4;
-    --primary-soft:#eeeefb;
-    --primary-grad:linear-gradient(135deg,#6366f1 0%,#8b5cf6 100%);
-    --green:#16a34a;
-    --green-soft:#e7f6ee;
-    --red:#e11d48;
-    --red-soft:#fdeaf0;
-    --amber:#f59e0b;
-    --amber-soft:#fdf3e2;
-    --blue:#2563eb;
-    --blue-soft:#e8f0fe;
-    --radius:14px;
-    --radius-sm:10px;
-    --shadow:0 1px 2px rgba(20,23,45,0.04), 0 4px 16px -8px rgba(20,23,45,0.10);
-    --shadow-md:0 4px 24px -8px rgba(20,23,45,0.16);
-    --shadow-lg:0 12px 40px -12px rgba(20,23,45,0.22);
+    --border:#e3e8ef;
+    --border-strong:#cdd5e0;
+    --ink:#1b2a3d;           /* deep slate-navy text */
+    --ink-soft:#5b6b7f;
+    --text:#1b2a3d;
+    --muted:#8494a6;
+    --primary:#1e5fbf;       /* corporate blue */
+    --primary-dark:#164a99;
+    --primary-soft:#e8f0fb;
+    --primary-grad:linear-gradient(135deg,#1e5fbf 0%,#2b7de0 100%);
+    --green:#0f9d58;
+    --green-soft:#e6f5ee;
+    --red:#d92d20;
+    --red-soft:#fdecea;
+    --amber:#e08600;
+    --amber-soft:#fdf2e3;
+    --blue:#1e5fbf;
+    --blue-soft:#e8f0fb;
+    --radius:12px;
+    --radius-sm:9px;
+    --shadow:0 1px 2px rgba(27,42,61,0.05), 0 3px 12px -6px rgba(27,42,61,0.10);
+    --shadow-md:0 4px 20px -8px rgba(27,42,61,0.16);
+    --shadow-lg:0 12px 36px -12px rgba(27,42,61,0.22);
     --num:'Inter';
   }
   *{box-sizing:border-box;}
@@ -48,8 +48,8 @@
   /* top chrome */
   header.topbar{display:flex;justify-content:space-between;align-items:center;padding:0 24px;height:62px;background:#fff;color:var(--ink);position:sticky;top:0;z-index:30;border-bottom:1px solid var(--border);box-shadow:0 1px 3px rgba(20,23,45,0.03);}
   header.topbar h1{font-family:'Plus Jakarta Sans',sans-serif;font-size:20px;font-weight:800;margin:0;letter-spacing:-0.02em;color:var(--ink);display:flex;align-items:center;gap:9px;}
-  header.topbar h1::before{content:'';width:26px;height:26px;border-radius:8px;background:var(--primary-grad);box-shadow:0 3px 10px -2px rgba(91,91,214,0.55);flex-shrink:0;}
-  header.topbar h1 .mark{background:var(--primary-grad);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;}
+  header.topbar h1::before{content:'';width:26px;height:26px;border-radius:7px;background:var(--primary);box-shadow:0 2px 6px -1px rgba(30,95,191,0.4);flex-shrink:0;}
+  header.topbar h1 .mark{color:var(--primary);}
   header.topbar .who{font-size:12.5px;color:var(--ink-soft);letter-spacing:0.01em;}
   header.topbar .btn{background:var(--card);color:var(--ink);border:1px solid var(--border-strong);}
   header.topbar .btn:hover{background:var(--bg);border-color:var(--primary);color:var(--primary);}
@@ -57,8 +57,8 @@
   /* buttons */
   .btn{padding:9px 16px;border-radius:10px;border:1px solid var(--border-strong);background:var(--card);cursor:pointer;font-size:13.5px;font-weight:600;font-family:inherit;color:var(--ink);transition:all .15s ease;line-height:1.1;}
   .btn:hover{border-color:var(--primary);color:var(--primary);background:var(--primary-soft);}
-  .btn-primary{background:var(--primary-grad);color:#fff !important;border:1px solid transparent;box-shadow:0 2px 10px -2px rgba(91,91,214,0.5);}
-  .btn-primary:hover{filter:brightness(1.07);color:#fff !important;transform:translateY(-1px);box-shadow:0 6px 18px -4px rgba(91,91,214,0.6);}
+  .btn-primary{background:var(--primary);color:#fff !important;border:1px solid var(--primary);box-shadow:0 1px 3px rgba(30,95,191,0.25);}
+  .btn-primary:hover{background:var(--primary-dark);border-color:var(--primary-dark);color:#fff !important;box-shadow:0 2px 8px -1px rgba(30,95,191,0.35);}
   .btn-danger{background:#fff;color:var(--red);border:1px solid #f3c6d2;}
   .btn-danger:hover{background:var(--red-soft);border-color:var(--red);color:var(--red);}
   .btn-green{background:var(--green);color:#fff !important;border:1px solid var(--green);box-shadow:0 2px 8px -2px rgba(22,163,74,0.45);}
@@ -111,7 +111,7 @@
   .sidebar{width:216px;flex-shrink:0;background:#fff;border-right:1px solid var(--border);padding:16px 12px;position:sticky;top:62px;height:calc(100vh - 62px);overflow-y:auto;}
   .sidebar .navlink{display:flex;align-items:center;gap:10px;padding:11px 14px;border-radius:10px;cursor:pointer;font-size:14px;font-weight:600;color:var(--ink-soft);margin-bottom:3px;transition:all .14s;}
   .sidebar .navlink:hover{background:var(--primary-soft);color:var(--primary);}
-  .sidebar .navlink.active{background:var(--primary-grad);color:#fff;box-shadow:0 4px 12px -3px rgba(91,91,214,0.5);}
+  .sidebar .navlink.active{background:var(--primary);color:#fff;box-shadow:0 2px 8px -2px rgba(30,95,191,0.4);}
   .sidebar .navlink.active:hover{color:#fff;}
   .main-content{flex:1;min-width:0;max-width:1220px;margin:0 auto;padding:26px 24px 60px;width:100%;}
   .hamburger{display:none;background:rgba(255,255,255,0.08);color:#fff;border:1px solid rgba(255,255,255,0.16);border-radius:7px;width:38px;height:34px;font-size:18px;cursor:pointer;align-items:center;justify-content:center;}
@@ -128,11 +128,24 @@
   .tabs{display:none;} /* legacy horizontal tabs hidden; sidebar used instead */
 
   /* login */
-  .login-wrap{display:flex;align-items:center;justify-content:center;min-height:100vh;background:linear-gradient(150deg,#6366f1 0%,#8b5cf6 50%,#a855f7 100%);padding:20px;}
-  .login-card{width:390px;box-shadow:0 24px 60px -20px rgba(30,20,80,0.5);}
+  .login-wrap{display:flex;min-height:100vh;background:var(--bg);}
+  .login-brand{flex:1;background:linear-gradient(150deg,#164a99 0%,#1e5fbf 55%,#2b7de0 100%);color:#fff;padding:56px 52px;display:flex;flex-direction:column;justify-content:space-between;position:relative;overflow:hidden;}
+  .login-brand::after{content:'';position:absolute;right:-120px;bottom:-120px;width:420px;height:420px;border-radius:50%;background:rgba(255,255,255,0.06);}
+  .login-brand::before{content:'';position:absolute;right:40px;top:-80px;width:260px;height:260px;border-radius:50%;background:rgba(255,255,255,0.05);}
+  .login-brand .lb-logo{font-family:'Plus Jakarta Sans',sans-serif;font-weight:800;font-size:26px;letter-spacing:-0.02em;display:flex;align-items:center;gap:10px;position:relative;z-index:1;}
+  .login-brand .lb-logo::before{content:'';width:30px;height:30px;border-radius:8px;background:#fff;}
+  .login-brand h1{font-family:'Plus Jakarta Sans',sans-serif;font-size:34px;font-weight:800;line-height:1.15;letter-spacing:-0.02em;margin:0 0 16px;position:relative;z-index:1;}
+  .login-brand p{font-size:15px;line-height:1.6;color:rgba(255,255,255,0.85);max-width:400px;position:relative;z-index:1;}
+  .login-brand .lb-feats{list-style:none;padding:0;margin:22px 0 0;position:relative;z-index:1;}
+  .login-brand .lb-feats li{display:flex;align-items:center;gap:10px;font-size:14px;color:rgba(255,255,255,0.92);margin-bottom:12px;}
+  .login-brand .lb-feats li::before{content:'✓';display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;background:rgba(255,255,255,0.18);font-size:12px;font-weight:700;flex-shrink:0;}
+  .login-brand .lb-foot{font-size:12.5px;color:rgba(255,255,255,0.7);position:relative;z-index:1;}
+  .login-form-side{width:480px;max-width:100%;display:flex;align-items:center;justify-content:center;padding:40px 44px;}
+  .login-form-inner{width:100%;max-width:360px;}
   .login-card h2{font-family:'Plus Jakarta Sans',sans-serif;font-weight:800;font-size:26px;letter-spacing:-0.02em;}
-  .auth-tabs{display:flex;gap:4px;background:var(--bg);padding:4px;border-radius:12px;}
-  .auth-tab{flex:1;text-align:center;padding:9px 12px;border-radius:9px;cursor:pointer;font-size:13.5px;font-weight:600;color:var(--ink-soft);transition:all .14s;}
+  @media(max-width:860px){ .login-brand{display:none;} .login-form-side{width:100%;} }
+  .auth-tabs{display:flex;gap:4px;background:var(--bg);padding:4px;border-radius:11px;}
+  .auth-tab{flex:1;text-align:center;padding:9px 12px;border-radius:8px;cursor:pointer;font-size:13.5px;font-weight:600;color:var(--ink-soft);transition:all .14s;}
   .auth-tab:hover{color:var(--ink);}
   .auth-tab.active{background:#fff;color:var(--primary);box-shadow:var(--shadow);}
   .brand-lockup{display:flex;align-items:baseline;gap:2px;}
@@ -141,22 +154,16 @@
   .row-actions{display:flex;gap:6px;flex-wrap:wrap;}
   .muted{color:var(--muted);font-size:13px;}
   .stat{font-size:30px;font-weight:700;letter-spacing:-0.02em;font-variant-numeric:tabular-nums;font-family:'Plus Jakarta Sans',sans-serif;color:var(--ink);line-height:1.1;}
-  .kpi{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:20px 22px;box-shadow:var(--shadow);position:relative;overflow:hidden;transition:transform .18s,box-shadow .18s;}
-  .kpi::after{content:'';position:absolute;top:-40px;right:-40px;width:120px;height:120px;border-radius:50%;background:var(--primary-grad);opacity:0.06;transition:opacity .18s;}
-  .kpi:hover{transform:translateY(-3px);box-shadow:var(--shadow-md);}
-  .kpi:hover::after{opacity:0.11;}
-  .kpi .kpi-label{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-soft);font-weight:700;margin-bottom:10px;position:relative;z-index:1;}
-  .kpi .kpi-value{font-size:29px;font-weight:800;font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.025em;color:var(--ink);font-variant-numeric:tabular-nums;line-height:1;position:relative;z-index:1;}
-  .kpi .kpi-sub{font-size:12px;color:var(--ink-soft);margin-top:8px;position:relative;z-index:1;}
-  .kpi .kpi-accent{position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--primary-grad);}
-  .kpi.amber .kpi-accent{background:linear-gradient(180deg,#fbbf24,#f59e0b);}
-  .kpi.amber::after{background:linear-gradient(135deg,#fbbf24,#f59e0b);}
-  .kpi.blue .kpi-accent{background:linear-gradient(180deg,#3b82f6,#2563eb);}
-  .kpi.blue::after{background:linear-gradient(135deg,#3b82f6,#2563eb);}
-  .kpi.red .kpi-accent{background:linear-gradient(180deg,#fb7185,#e11d48);}
-  .kpi.red::after{background:linear-gradient(135deg,#fb7185,#e11d48);}
-  .kpi.green .kpi-accent{background:linear-gradient(180deg,#34d399,#16a34a);}
-  .kpi.green::after{background:linear-gradient(135deg,#34d399,#16a34a);}
+  .kpi{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:20px 22px;box-shadow:var(--shadow);position:relative;overflow:hidden;transition:transform .16s,box-shadow .16s;}
+  .kpi:hover{transform:translateY(-2px);box-shadow:var(--shadow-md);}
+  .kpi .kpi-label{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-soft);font-weight:700;margin-bottom:10px;}
+  .kpi .kpi-value{font-size:29px;font-weight:800;font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.025em;color:var(--ink);font-variant-numeric:tabular-nums;line-height:1;}
+  .kpi .kpi-sub{font-size:12px;color:var(--ink-soft);margin-top:8px;}
+  .kpi .kpi-accent{position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--primary);}
+  .kpi.amber .kpi-accent{background:var(--amber);}
+  .kpi.blue .kpi-accent{background:var(--blue);}
+  .kpi.red .kpi-accent{background:var(--red);}
+  .kpi.green .kpi-accent{background:var(--green);}
 
   /* modal */
   .modal-bg{position:fixed;inset:0;background:rgba(16,24,34,0.55);backdrop-filter:blur(2px);display:flex;align-items:center;justify-content:center;z-index:50;padding:20px;}
@@ -186,7 +193,7 @@
   .legend-dot{width:11px;height:11px;border-radius:3px;flex-shrink:0;}
 
   /* section eyebrow */
-  .eyebrow{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--primary);font-weight:700;margin-bottom:8px;display:inline-block;background:var(--primary-soft);padding:4px 12px;border-radius:99px;}
+  .eyebrow{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--primary);font-weight:700;margin-bottom:8px;display:inline-block;}
 
   .hidden{display:none;}
   a{color:var(--primary);text-decoration:none;}
@@ -300,6 +307,10 @@ function fmtMoney(n){
 function fmtDate(d){
   if(!d) return '-';
   return new Date(d).toLocaleDateString('en-IN', {day:'2-digit', month:'short', year:'numeric'});
+}
+function fmtDateTime(d){
+  if(!d) return '-';
+  return new Date(d).toLocaleString('en-IN', {day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit'});
 }
 function badge(status){
   return `<span class="badge badge-${status}">${status.replace('_',' ')}</span>`;
@@ -575,43 +586,75 @@ async function submitChangePassword(){
 function renderLogin(){
   document.getElementById('root').innerHTML = `
   <div class="login-wrap">
-    <div class="card login-card">
-      <div class="brand-lockup"><h2 style="margin:0;">Kiy<span style="color:var(--primary);">ra</span></h2></div>
-      <p class="muted" style="margin-top:2px;">Purchase orders, vendors &amp; invoice approval</p>
-      <div class="auth-tabs" style="margin:18px 0 16px;">
-        <div class="auth-tab active" id="tab-signin" onclick="switchAuthTab('signin')">Sign in</div>
-        <div class="auth-tab" id="tab-signup" onclick="switchAuthTab('signup')">Vendor sign up</div>
+    <div class="login-brand">
+      <div class="lb-logo">Kiyra</div>
+      <div>
+        <h1>Procurement that speaks GST.</h1>
+        <p>Raise purchase orders, onboard vendors, and approve invoices — with CGST, SGST and IGST worked out automatically. Built by chartered accountants, for Indian businesses.</p>
+        <ul class="lb-feats">
+          <li>GST-native purchase orders &amp; invoice matching</li>
+          <li>GSTR-2B / ITC hold tracking to protect your credit</li>
+          <li>Vendor onboarding, approvals &amp; payment tracking</li>
+          <li>Reports, exports &amp; role-based team access</li>
+        </ul>
       </div>
-      <div id="auth-signin">
-        <label>Email</label>
-        <input id="login-email" type="email" placeholder="you@company.com"/>
-        <label style="margin-top:12px;display:block;">Password</label>
-        <input id="login-pass" type="password" placeholder="••••••••"/>
-        <button class="btn btn-primary" style="width:100%;margin-top:16px;" onclick="doSignIn()">Sign in</button>
-        <p style="margin-top:12px;text-align:center;"><a href="#" onclick="showForgotPassword();return false;" style="font-size:13px;">Forgot password?</a></p>
-        <p class="muted" id="login-msg" style="margin-top:8px;color:var(--red);"></p>
-      </div>
-      <div id="auth-signup" class="hidden">
-        <p class="muted">Vendors: sign up with the code your client gave you, then wait for them to activate your account.</p>
-        <label style="margin-top:8px;display:block;">Company code</label>
-        <input id="signup-slug" placeholder="e.g. abc-traders"/>
-        <label style="margin-top:12px;display:block;">Business name</label>
-        <input id="signup-name" placeholder="Your business name"/>
-        <label style="margin-top:12px;display:block;">Email</label>
-        <input id="signup-email" type="email"/>
-        <label style="margin-top:12px;display:block;">Password</label>
-        <input id="signup-pass" type="password"/>
-        <button class="btn btn-primary" style="width:100%;margin-top:16px;" onclick="doVendorSignup()">Create vendor account</button>
-        <p class="muted" id="signup-msg" style="margin-top:8px;"></p>
+      <div class="lb-foot">A product of Garg Shekhar &amp; Company, Chartered Accountants · Meerut &amp; Noida</div>
+    </div>
+    <div class="login-form-side">
+      <div class="login-form-inner">
+        <div class="brand-lockup" style="margin-bottom:2px;"><h2 style="margin:0;">Kiy<span style="color:var(--primary);">ra</span></h2></div>
+        <p class="muted" style="margin-top:2px;margin-bottom:18px;">Purchase orders, vendors &amp; invoice approval</p>
+        <div class="auth-tabs" style="margin-bottom:18px;">
+          <div class="auth-tab active" id="tab-signin" onclick="switchAuthTab('signin')">Sign in</div>
+          <div class="auth-tab" id="tab-company" onclick="switchAuthTab('company')">Start free trial</div>
+          <div class="auth-tab" id="tab-signup" onclick="switchAuthTab('signup')">Vendor</div>
+        </div>
+        <div id="auth-signin">
+          <label>Email</label>
+          <input id="login-email" type="email" placeholder="you@company.com"/>
+          <label style="margin-top:12px;display:block;">Password</label>
+          <input id="login-pass" type="password" placeholder="••••••••"/>
+          <button class="btn btn-primary" style="width:100%;margin-top:16px;" onclick="doSignIn()">Sign in</button>
+          <p style="margin-top:12px;text-align:center;"><a href="#" onclick="showForgotPassword();return false;" style="font-size:13px;">Forgot password?</a></p>
+          <p class="muted" id="login-msg" style="margin-top:8px;color:var(--red);"></p>
+        </div>
+        <div id="auth-company" class="hidden">
+          <p class="muted">Start a free 14-day trial. No card required. Set up your company and start raising POs in minutes.</p>
+          <label style="margin-top:8px;display:block;">Company name</label>
+          <input id="co-name" placeholder="Your company name"/>
+          <label style="margin-top:10px;display:block;">Your name</label>
+          <input id="co-admin-name" placeholder="Full name"/>
+          <label style="margin-top:10px;display:block;">Work email</label>
+          <input id="co-email" type="email" placeholder="you@company.com"/>
+          <label style="margin-top:10px;display:block;">Password</label>
+          <input id="co-pass" type="password" placeholder="Create a password"/>
+          <button class="btn btn-primary" style="width:100%;margin-top:16px;" onclick="doCompanySignup()">Start 14-day free trial</button>
+          <p class="muted" id="co-msg" style="margin-top:8px;"></p>
+        </div>
+        <div id="auth-signup" class="hidden">
+          <p class="muted">Vendors: sign up with the code your client gave you, then wait for them to activate your account.</p>
+          <label style="margin-top:8px;display:block;">Company code</label>
+          <input id="signup-slug" placeholder="e.g. abc-traders"/>
+          <label style="margin-top:12px;display:block;">Business name</label>
+          <input id="signup-name" placeholder="Your business name"/>
+          <label style="margin-top:12px;display:block;">Email</label>
+          <input id="signup-email" type="email"/>
+          <label style="margin-top:12px;display:block;">Password</label>
+          <input id="signup-pass" type="password"/>
+          <button class="btn btn-primary" style="width:100%;margin-top:16px;" onclick="doVendorSignup()">Create vendor account</button>
+          <p class="muted" id="signup-msg" style="margin-top:8px;"></p>
+        </div>
       </div>
     </div>
   </div>`;
 }
 function switchAuthTab(t){
-  document.getElementById('tab-signin').classList.toggle('active', t==='signin');
-  document.getElementById('tab-signup').classList.toggle('active', t==='signup');
-  document.getElementById('auth-signin').classList.toggle('hidden', t!=='signin');
-  document.getElementById('auth-signup').classList.toggle('hidden', t!=='signup');
+  ['signin','company','signup'].forEach(k=>{
+    const tab = document.getElementById('tab-'+(k==='signin'?'signin':k));
+    const panel = document.getElementById('auth-'+k);
+    if(tab) tab.classList.toggle('active', k===t);
+    if(panel) panel.classList.toggle('hidden', k!==t);
+  });
 }
 async function doSignIn(){
   const email = document.getElementById('login-email').value.trim();
@@ -722,9 +765,48 @@ async function doVendorSignup(){
   await resolveRole();
 }
 
-// ============================================================
-// SHARED SHELL
-// ============================================================
+// Read-only guard for expired trials. Returns true if blocked.
+function blockedReadOnly(){
+  if(state.readOnly){
+    toast('Your trial has ended — this account is read-only. Choose a plan to reactivate.', true);
+    return true;
+  }
+  return false;
+}
+
+// ---- Company self-signup (starts a 14-day trial) ----
+async function doCompanySignup(){
+  const name = document.getElementById('co-name').value.trim();
+  const adminName = document.getElementById('co-admin-name').value.trim();
+  const email = document.getElementById('co-email').value.trim();
+  const password = document.getElementById('co-pass').value;
+  const msg = document.getElementById('co-msg');
+  msg.style.color = 'var(--red)';
+  if(!name || !adminName || !email || !password){ msg.textContent = 'All fields are required.'; return; }
+  if(password.length < 6){ msg.textContent = 'Password must be at least 6 characters.'; return; }
+  msg.style.color = 'var(--ink-soft)';
+  msg.textContent = 'Setting up your workspace…';
+
+  // 1. Create the auth account (scratch client so no session clash)
+  const { data: sdata, error: serr } = await scratchClient().auth.signUp({ email, password });
+  if(serr){ msg.style.color='var(--red)'; msg.textContent = serr.message; return; }
+  if(!sdata.user){ msg.style.color='var(--red)'; msg.textContent = 'Signup failed — please try again.'; return; }
+
+  // 2. Sign in as the new user so the company-creation runs under their identity
+  const { error: sierr } = await sb.auth.signInWithPassword({ email, password });
+  if(sierr){ msg.style.color='var(--red)'; msg.textContent = 'Account created. If email confirmation is on, confirm it then sign in.'; return; }
+
+  // 3. Create the company + admin + trial via SECURITY DEFINER function
+  const { error: cErr } = await sb.rpc('signup_company', {
+    p_company_name: name, p_admin_name: adminName, p_admin_email: email, p_auth_user_id: sdata.user.id
+  });
+  if(cErr){ msg.style.color='var(--red)'; msg.textContent = 'Could not create company: '+cErr.message; return; }
+
+  msg.style.color = 'var(--green)';
+  msg.textContent = 'Welcome to Kiyra! Loading your 14-day trial…';
+  state.session = (await sb.auth.getSession()).data.session;
+  await resolveRole();
+}
 function shell(title, roleLabel, bodyHtml, tabs, renderFn){
   tabs = tabs || [];
   const nav = tabs.map(([k,l])=>`<div class="navlink ${state.activeTab===k?'active':''}" onclick="closeSidebar();${renderFn}('${k}')">${l}</div>`).join('');
@@ -932,8 +1014,16 @@ async function renderCompanyApp(tab){
   const cid = state.company.id;
   const isAdmin = state.role === 'company_admin';
 
+  // Trial-status check: flips an expired trial to read-only.
+  try {
+    const { data: st } = await sb.rpc('check_trial_status', { p_company_id: cid });
+    if(st){ state.company.plan_status = st; }
+  } catch(e){}
+  state.readOnly = state.company.plan_status === 'expired';
+
   let tabs = [['dashboard','Dashboard'],['pos','Purchase Orders'],['invoices','Invoices / Approvals'],['payables','Payables'],['payments','Payments'],['reports','Reports'],['vendors','Vendors']];
   if(isAdmin) tabs.push(['users','Team']);
+  if(isAdmin) tabs.push(['auditlog','Audit Log']);
   if(isAdmin) tabs.push(['settings','Settings']);
   // Non-admins with a restricted tab set only see their allowed tabs.
   // allowed_tabs is null/undefined for full access; an array restricts.
@@ -951,6 +1041,21 @@ async function renderCompanyApp(tab){
   }
 
   let body = '';
+
+  // Trial / expiry banner
+  if(state.company.plan_status === 'expired'){
+    body += `<div style="background:var(--red-soft);border:1px solid #f3b6b0;border-radius:12px;padding:14px 18px;margin-bottom:16px;">
+      <strong style="color:var(--red);">Your free trial has ended.</strong>
+      <span style="color:var(--ink-soft);font-size:13.5px;"> Your account is now read-only — you can view and export data, but can't create or edit. To reactivate, choose a plan: contact us on WhatsApp <a href="https://wa.me/918882335548">+91 88823 35548</a> or email anshulggrg@gmail.com.</span>
+    </div>`;
+  } else if(state.company.plan === 'trial' && state.company.trial_ends_at){
+    const daysLeft = Math.ceil((new Date(state.company.trial_ends_at) - new Date())/(1000*60*60*24));
+    if(daysLeft >= 0){
+      body += `<div style="background:var(--primary-soft);border:1px solid #bcd4f2;border-radius:12px;padding:12px 16px;margin-bottom:16px;font-size:13.5px;color:var(--ink);">
+        <strong>Free trial:</strong> ${daysLeft} day${daysLeft===1?'':'s'} left. Enjoying Kiyra? <a href="https://wa.me/918882335548">Talk to us</a> to pick a plan.
+      </div>`;
+    }
+  }
 
   if(state.activeTab === 'dashboard'){
     const { data: pos } = await sb.from('purchase_orders').select('id,status,total_amount,created_at,vendor_id,vendors(name)').eq('company_id',cid);
@@ -1368,6 +1473,41 @@ async function renderCompanyApp(tab){
     </div>`;
   }
 
+  else if(state.activeTab === 'auditlog' && isAdmin){
+    const { data: logs } = await sb.from('activity_log').select('*, company_users(name,email)').eq('company_id',cid).order('created_at',{ascending:false}).limit(500);
+    window.__auditForExport = logs || [];
+    const actionLabel = (a)=>({
+      invoice_decision_changed:'Approval changed', invoice_paid:'Invoice paid', invoice_part_paid:'Part payment',
+      uploaded_invoice:'Invoice uploaded', gstr2b_updated:'GSTR-2B updated', invoice_hold_set:'Hold placed',
+      invoice_hold_released:'Hold released', user_tabs_updated:'Team access changed'
+    })[a] || (a||'').replace(/_/g,' ');
+    body += `<div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <h3 style="margin:0;">Audit Log</h3>
+        <div style="display:flex;gap:6px;">
+          <button class="btn btn-sm" onclick="exportAudit('csv')">CSV</button>
+          <button class="btn btn-sm" onclick="exportAudit('xlsx')">Excel</button>
+          <button class="btn btn-sm" onclick="exportAudit('pdf')">PDF</button>
+        </div>
+      </div>
+      <p class="muted" style="margin:6px 0;">A permanent record of key actions — approvals, changes, payments, holds — with who did what and when. Most recent first.</p>
+      ${buildFilterBar('audit-table', { search:true })}
+      <table id="audit-table" style="margin-top:6px;">
+        <tr><th>When</th><th>Who</th><th>Action</th><th>Details</th></tr>
+        ${(logs||[]).map(l=>{
+          const who = l.company_users?.name || l.company_users?.email || 'System';
+          const det = l.details ? (typeof l.details==='object' ? Object.entries(l.details).map(([k,v])=>`${k}: ${v}`).join(', ') : String(l.details)) : '';
+          return `<tr data-search="${(who+' '+actionLabel(l.action)+' '+det).toLowerCase().replace(/"/g,'&quot;')}">
+            <td class="muted" style="white-space:nowrap;">${fmtDateTime(l.created_at)}</td>
+            <td>${who}</td>
+            <td>${actionLabel(l.action)}</td>
+            <td class="muted" style="font-size:12px;">${det}</td>
+          </tr>`;
+        }).join('') || '<tr><td colspan="4" class="muted">No activity recorded yet.</td></tr>'}
+      </table>
+    </div>`;
+  }
+
   else if(state.activeTab === 'settings' && isAdmin){
     const c = state.company;
     body += `<div class="card">
@@ -1521,6 +1661,7 @@ async function actOnPO(id, action){
 
 // ---- Mark invoice paid (with option to hold GST until 2B) ----
 async function markInvoicePaid(id){
+  if(blockedReadOnly()) return;
   const { data: i, error } = await sb.from('invoices').select('*, vendors(name)').eq('id', id).single();
   if(error){ toast(error.message, true); return; }
   const gst = Number(i.gst_amount||0);
@@ -1591,6 +1732,7 @@ async function confirmPayment(id){
 
 // ---- GSTR-2B status modal ----
 async function openGstr2bModal(id){
+  if(blockedReadOnly()) return;
   const { data: i, error } = await sb.from('invoices').select('*, vendors(name)').eq('id', id).single();
   if(error){ toast(error.message, true); return; }
   const st = i.gstr2b_status || 'pending';
@@ -1636,6 +1778,7 @@ async function saveGstr2b(id){
 
 // ---- Manual hold modal (company places a discretionary hold, visible to vendor) ----
 async function openHoldModal(id){
+  if(blockedReadOnly()) return;
   const { data: i, error } = await sb.from('invoices').select('*, vendors(name)').eq('id', id).single();
   if(error){ toast(error.message, true); return; }
   showModal(`
@@ -1775,6 +1918,18 @@ function exportVendorPending(name, fmt){
   const fn = `pending_${name.replace(/[^a-z0-9]/gi,'_')}`;
   if(fmt==='csv') exportRowsCSV(fn, headers, rows);
   else exportRowsPDF('Pending invoices — '+name, headers, rows);
+}
+function exportAudit(fmt){
+  const rows = (window.__auditForExport||[]).map(l=>{
+    const who = l.company_users?.name || l.company_users?.email || 'System';
+    const det = l.details ? (typeof l.details==='object' ? Object.entries(l.details).map(([k,v])=>`${k}: ${v}`).join('; ') : String(l.details)) : '';
+    return [fmtDateTime(l.created_at), who, (l.action||'').replace(/_/g,' '), det];
+  });
+  const headers = ['When','Who','Action','Details'];
+  const fn = `audit_log_${state.company.slug}`;
+  if(fmt==='csv') exportRowsCSV(fn, headers, rows);
+  else if(fmt==='xlsx') exportRowsXLSX(fn, headers, rows, 'Audit Log');
+  else exportRowsPDF('Audit Log', headers, rows);
 }
 function exportInvoices(fmt){
   const rows = (window.__invoicesForExport||[]).map(i=>[
@@ -2197,6 +2352,7 @@ function onGSTManualEdit(id){
 
 let poItemCount = 0;
 function openNewPOModal(){
+  if(blockedReadOnly()) return;
   poItemCount = 0;
   showModal(`
     <span class="close-x" onclick="closeModal()">✕</span>
@@ -2668,6 +2824,7 @@ async function printPO(id){
 
 // ---- Vendor management (company side) ----
 function openNewVendorModal(){
+  if(blockedReadOnly()) return;
   showModal(`
     <span class="close-x" onclick="closeModal()">✕</span>
     <h3>Add vendor</h3>
@@ -2793,6 +2950,7 @@ async function saveRoleTabs(userId){
 }
 
 function openNewUserModal(){
+  if(blockedReadOnly()) return;
   showModal(`
     <span class="close-x" onclick="closeModal()">✕</span>
     <h3>Add team member</h3>
@@ -2935,7 +3093,40 @@ async function openInvoiceModal(id){
         <button class="btn btn-danger" style="flex:1;" onclick="actOnInvoice('${id}','rejected')">Reject</button>
       </div>
     ` : (['submitted','under_review'].includes(inv.status) ? '<p class="muted">Waiting on a different approval level.</p>' : '')}
+    ${(state.role==='company_admin' && ['approved','rejected'].includes(inv.status) && inv.status!=='paid') ? `
+      <div style="margin-top:14px;border-top:1px solid var(--border);padding-top:12px;">
+        <h4 style="margin:0 0 6px;">Change decision</h4>
+        <p class="muted" style="font-size:12px;margin:0 0 8px;">As admin, you can revise this invoice's approval. The change is recorded in the audit log with your name, the old and new status, and your reason.</p>
+        <label style="display:block;">Reason for change</label>
+        <textarea id="inv-change-reason" rows="2" placeholder="e.g. approved in error — vendor sent revised invoice"></textarea>
+        <div style="display:flex;gap:8px;margin-top:8px;">
+          ${inv.status!=='approved'?`<button class="btn btn-green" style="flex:1;" onclick="changeInvoiceDecision('${id}','approved')">Change to Approved</button>`:''}
+          ${inv.status!=='rejected'?`<button class="btn btn-danger" style="flex:1;" onclick="changeInvoiceDecision('${id}','rejected')">Change to Rejected</button>`:''}
+          <button class="btn" style="flex:1;" onclick="changeInvoiceDecision('${id}','submitted')">Re-open for review</button>
+        </div>
+      </div>
+    ` : (inv.status==='paid' ? '<p class="muted" style="margin-top:10px;font-size:12px;">This invoice is paid — its approval can no longer be changed.</p>' : '')}
   `);
+}
+// Admin revises an already-decided invoice; logged to the audit trail.
+async function changeInvoiceDecision(id, newStatus){
+  if(blockedReadOnly()) return;
+  const reason = (document.getElementById('inv-change-reason')||{}).value?.trim() || null;
+  if(!reason){ toast('Please enter a reason for the change', true); return; }
+  const { data: inv } = await sb.from('invoices').select('status, invoice_number').eq('id', id).single();
+  const oldStatus = inv.status;
+  // reset approval level if re-opened
+  const patch = { status: newStatus };
+  if(newStatus==='submitted') patch.current_approval_level = 1;
+  const { error } = await sb.from('invoices').update(patch).eq('id', id);
+  if(error){ toast(error.message, true); return; }
+  // write to the approvals audit log
+  await sb.from('approvals').insert({
+    invoice_id: id, approver_id: state.profile.id, level: 0,
+    action: newStatus, comments: `[DECISION CHANGED from ${oldStatus}] ${reason}`
+  }).then(()=>{}, ()=>{});
+  await logActivity(state.company.id, 'invoice_decision_changed', 'invoice', id, {from: oldStatus, to: newStatus, reason});
+  closeModal(); toast(`Decision changed to ${newStatus}`); renderCompanyApp('invoices');
 }
 async function actOnInvoice(id, action){
   const comments = document.getElementById('inv-comments').value;
@@ -3227,6 +3418,7 @@ function openUploadInvoiceModal(poId, poNumber){
 }
 async function submitInvoice(poId){
   const msg = document.getElementById('ui-msg');
+  msg.style.color = 'var(--red)';
   const invoice_number = document.getElementById('ui-number').value.trim();
   const invoice_date = document.getElementById('ui-date').value;
   const amount = parseFloat(document.getElementById('ui-amount').value)||0;
@@ -3234,16 +3426,24 @@ async function submitInvoice(poId){
   const file = document.getElementById('ui-file').files[0];
   if(!invoice_number || !invoice_date || !amount || !file){ msg.textContent = 'All fields and a file are required.'; return; }
 
-  const path = `${state.profile.id}/${Date.now()}_${file.name}`;
-  const { error: upErr } = await sb.storage.from('invoices').upload(path, file);
-  if(upErr){ msg.textContent = 'File upload failed: '+upErr.message; return; }
+  msg.style.color = 'var(--ink-soft)';
+  msg.textContent = 'Uploading…';
+  // Sanitise filename — Supabase storage rejects spaces and special characters,
+  // which would make the upload fail and abort the whole submit.
+  const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+  const ext = safeName.includes('.') ? safeName.split('.').pop() : 'dat';
+  const path = `${state.profile.id}/${Date.now()}.${ext}`;
+  const { error: upErr } = await sb.storage.from('invoices').upload(path, file, { upsert:true, contentType: file.type||'application/octet-stream' });
+  if(upErr){ msg.style.color='var(--red)'; msg.textContent = 'File upload failed: '+upErr.message; return; }
 
+  const gst = tax_amount;
   const { data, error } = await sb.from('invoices').insert({
     company_id: state.company.id, po_id: poId, vendor_id: state.profile.id,
     invoice_number, invoice_date, file_path: path, amount, tax_amount,
-    total_amount: amount+tax_amount, status:'submitted', current_approval_level: 1
+    total_amount: amount+tax_amount, status:'submitted', current_approval_level: 1,
+    gst_amount: gst, taxable_value: amount, amount_paid: 0
   }).select().single();
-  if(error){ msg.textContent = error.message; return; }
+  if(error){ msg.style.color='var(--red)'; msg.textContent = 'Could not save invoice: '+error.message; return; }
   await logActivity(state.company.id, 'uploaded_invoice', 'invoice', data.id, {invoice_number});
   closeModal(); toast('Invoice submitted for approval'); renderVendorApp('invoices');
 }
