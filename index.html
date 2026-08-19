@@ -1272,6 +1272,7 @@ async function renderCompanyApp(tab){
       <div style="display:flex;justify-content:space-between;align-items:center;">
         <h3 style="margin:0;">Invoices / Approvals</h3>
         <div style="display:flex;gap:6px;">
+          ${isAdmin && !state.readOnly ? `<button class="btn btn-sm btn-primary" onclick="openReconcile2bModal()">Reconcile GSTR-2B</button>` : ''}
           <button class="btn btn-sm" onclick="exportInvoices('csv')">CSV</button>
           <button class="btn btn-sm" onclick="exportInvoices('xlsx')">Excel</button>
           <button class="btn btn-sm" onclick="exportInvoices('pdf')">PDF</button>
@@ -1810,9 +1811,197 @@ async function saveGstr2b(id){
   closeModal(); toast('2B status saved'); renderCompanyApp('invoices');
 }
 
-// ---- Manual hold modal (company places a discretionary hold, visible to vendor) ----
-async function openHoldModal(id){
+// ============================================================
+// GSTR-2B AUTO-RECONCILIATION (Level 2)
+// Upload the GSTR-2B (JSON or Excel) downloaded from the GST portal,
+// auto-match against purchase invoices by GSTIN + invoice number,
+// check tax amounts (with near-match tolerance), then let the user
+// apply the results in bulk.
+// ============================================================
+
+// Normalise an invoice number so trivial formatting differences still match:
+// uppercase, strip spaces/slashes/hyphens, drop leading zeros on trailing digits.
+function normInvNo(s){
+  if(s===null||s===undefined) return '';
+  let x = String(s).toUpperCase().replace(/[\s\/\-_.]/g,'');
+  // strip leading zeros from any trailing number block (INV001 -> INV1)
+  x = x.replace(/([A-Z]*)0*([0-9]+)$/, (m,a,b)=>a+String(parseInt(b,10)));
+  return x;
+}
+function normGstin(s){ return (s||'').toString().toUpperCase().replace(/\s/g,''); }
+
+function openReconcile2bModal(){
   if(blockedReadOnly()) return;
+  showModal(`
+    <span class="close-x" onclick="closeModal()">✕</span>
+    <h3>Reconcile GSTR-2B</h3>
+    <p class="muted" style="font-size:13px;">Download your GSTR-2B from the GST portal (Returns → GSTR-2B) as <strong>JSON</strong> (most reliable) or <strong>Excel</strong>, then upload it here. Kiyra will match it against your purchase invoices automatically.</p>
+    <label style="display:block;margin-top:10px;">GSTR-2B file (.json or .xlsx)</label>
+    <input id="r2b-file" type="file" accept=".json,.xlsx,.xls"/>
+    <button class="btn btn-primary" style="width:100%;margin-top:14px;" onclick="runReconcile2b()">Match against my invoices</button>
+    <p class="muted" id="r2b-msg" style="font-size:12px;margin-top:8px;"></p>
+  `, true);
+}
+
+// Parse a GSTR-2B JSON structure into a flat list of {gstin, invNo, taxable, tax}
+function parse2bJson(obj){
+  const out = [];
+  // The GSTR-2B JSON nests supplier docs under data.docdata.b2b[].inv[]
+  // but portals/versions vary; walk defensively.
+  const root = obj.data || obj;
+  const b2bBlocks = (root.docdata && root.docdata.b2b) || root.b2b || [];
+  (b2bBlocks||[]).forEach(supplier=>{
+    const gstin = supplier.ctin || supplier.gstin || '';
+    (supplier.inv||supplier.invoices||[]).forEach(inv=>{
+      // tax may be at inv level or inside items[].itm_det
+      let igst=0,cgst=0,sgst=0,txval=0;
+      if(Array.isArray(inv.items)){
+        inv.items.forEach(it=>{ const d=it.itm_det||it; igst+=+d.iamt||0; cgst+=+d.camt||0; sgst+=+d.samt||0; txval+=+d.txval||0; });
+      } else {
+        igst=+inv.igst||+inv.iamt||0; cgst=+inv.cgst||+inv.camt||0; sgst=+inv.sgst||+inv.samt||0; txval=+inv.txval||0;
+      }
+      out.push({ gstin, invNo: inv.inum||inv.invoice_number||'', taxable: txval, tax: igst+cgst+sgst });
+    });
+  });
+  return out;
+}
+
+// Parse a GSTR-2B Excel workbook (SheetJS already loaded) into the same flat list.
+function parse2bExcel(wb){
+  const out = [];
+  wb.SheetNames.forEach(name=>{
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets[name], {header:1, defval:''});
+    // find a header row containing GSTIN and Invoice number columns
+    let hIdx = -1, col = {};
+    for(let r=0;r<Math.min(rows.length,15);r++){
+      const cells = rows[r].map(c=>String(c).toLowerCase());
+      const gi = cells.findIndex(c=>c.includes('gstin'));
+      const ii = cells.findIndex(c=>c.includes('invoice number')||c==='invoice no.'||c.includes('invoice no'));
+      if(gi>=0 && ii>=0){
+        hIdx=r;
+        col.gstin=gi; col.inv=ii;
+        col.igst=cells.findIndex(c=>c.includes('integrated')||c==='igst');
+        col.cgst=cells.findIndex(c=>c.includes('central')||c==='cgst');
+        col.sgst=cells.findIndex(c=>c.includes('state/ut')||c.includes('state')||c==='sgst');
+        col.txval=cells.findIndex(c=>c.includes('taxable'));
+        break;
+      }
+    }
+    if(hIdx<0) return; // not a data sheet
+    for(let r=hIdx+1;r<rows.length;r++){
+      const row = rows[r]; if(!row || !row[col.gstin]) continue;
+      const num=(x)=>{ const n=parseFloat(String(x).replace(/,/g,'')); return isNaN(n)?0:n; };
+      const igst=col.igst>=0?num(row[col.igst]):0, cgst=col.cgst>=0?num(row[col.cgst]):0, sgst=col.sgst>=0?num(row[col.sgst]):0;
+      out.push({ gstin:String(row[col.gstin]), invNo:String(row[col.inv]), taxable: col.txval>=0?num(row[col.txval]):0, tax: igst+cgst+sgst });
+    }
+  });
+  return out;
+}
+
+async function runReconcile2b(){
+  const msg = document.getElementById('r2b-msg');
+  msg.style.color = 'var(--ink-soft)';
+  const file = document.getElementById('r2b-file').files[0];
+  if(!file){ msg.style.color='var(--red)'; msg.textContent='Please choose a file first.'; return; }
+  msg.textContent = 'Reading file…';
+  let entries = [];
+  try {
+    if(/\.json$/i.test(file.name)){
+      const text = await file.text();
+      entries = parse2bJson(JSON.parse(text));
+    } else {
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf, {type:'array'});
+      entries = parse2bExcel(wb);
+    }
+  } catch(e){
+    msg.style.color='var(--red)'; msg.textContent = 'Could not read that file: '+e.message+'. Make sure it is the GSTR-2B JSON or Excel from the portal.'; return;
+  }
+  if(!entries.length){ msg.style.color='var(--red)'; msg.textContent='No invoice rows found in that file. Is it the full GSTR-2B (not the summary)?'; return; }
+
+  // Build a lookup of 2B entries by gstin+normalised invoice number
+  const map2b = {};
+  entries.forEach(e=>{ map2b[normGstin(e.gstin)+'|'+normInvNo(e.invNo)] = e; });
+
+  // Load our invoices with vendor GSTIN
+  const { data: invs } = await sb.from('invoices').select('*, vendors(name,gstin)').eq('company_id', state.company.id);
+  const results = [];
+  const matchedKeys = new Set();
+  (invs||[]).forEach(i=>{
+    const gstin = normGstin(i.vendors?.gstin);
+    const key = gstin+'|'+normInvNo(i.invoice_number);
+    const ourTax = Number(i.gst_amount||0);
+    const found = map2b[key];
+    if(found){
+      matchedKeys.add(key);
+      const diff = Math.abs(Number(found.tax) - ourTax);
+      if(diff <= 1){ results.push({inv:i, status:'exact', found, diff}); }
+      else { results.push({inv:i, status:'nearmatch', found, diff}); }
+    } else {
+      results.push({inv:i, status:'notfound', found:null, diff:null});
+    }
+  });
+  // 2B entries with no matching invoice in our books
+  const orphans = entries.filter(e=> !matchedKeys.has(normGstin(e.gstin)+'|'+normInvNo(e.invNo)));
+
+  window.__recon2b = { results, orphans };
+  renderReconcile2bResults();
+}
+
+function renderReconcile2bResults(){
+  const { results, orphans } = window.__recon2b;
+  const exact = results.filter(r=>r.status==='exact');
+  const near = results.filter(r=>r.status==='nearmatch');
+  const missing = results.filter(r=>r.status==='notfound' && Number(r.inv.gst_amount)>0);
+  const rowsHtml = (list, kind)=> list.map(r=>`
+    <tr>
+      <td>${r.inv.invoice_number}</td>
+      <td>${r.inv.vendors?.name||''}</td>
+      <td style="text-align:right;">${fmtMoney(r.inv.gst_amount||0)}</td>
+      <td style="text-align:right;">${r.found?fmtMoney(r.found.tax):'—'}</td>
+      <td>${kind==='exact'?'<span class="badge badge-approved">In 2B</span>':kind==='near'?`<span class="badge badge-submitted">Diff ${fmtMoney(r.diff)}</span>`:'<span class="badge badge-rejected">Not in 2B</span>'}</td>
+    </tr>`).join('');
+  showModal(`
+    <span class="close-x" onclick="closeModal()">✕</span>
+    <h3>GSTR-2B match results</h3>
+    <div class="grid grid-4" style="margin:10px 0;">
+      <div class="kpi green"><div class="kpi-accent"></div><div class="kpi-label">Matched (in 2B)</div><div class="kpi-value">${exact.length}</div></div>
+      <div class="kpi amber"><div class="kpi-accent"></div><div class="kpi-label">Amount differs</div><div class="kpi-value">${near.length}</div></div>
+      <div class="kpi red"><div class="kpi-accent"></div><div class="kpi-label">Not in 2B</div><div class="kpi-value">${missing.length}</div></div>
+      <div class="kpi"><div class="kpi-accent"></div><div class="kpi-label">In 2B, not in books</div><div class="kpi-value">${orphans.length}</div></div>
+    </div>
+    <p class="muted" style="font-size:12.5px;">Applying will set each invoice's 2B status: matched → <strong>In 2B</strong> (ITC released), not found → <strong>Not reflected</strong> (GST held). Amount-differs invoices are marked <strong>Not reflected</strong> so you can review them — nothing is auto-approved on a mismatch.</p>
+    <div style="max-height:280px;overflow:auto;margin-top:8px;border:1px solid var(--border);border-radius:8px;">
+      <table style="font-size:12.5px;">
+        <tr><th>Invoice #</th><th>Vendor</th><th style="text-align:right;">Our GST</th><th style="text-align:right;">2B GST</th><th>Result</th></tr>
+        ${rowsHtml(exact,'exact')}
+        ${rowsHtml(near,'near')}
+        ${rowsHtml(missing,'notfound')}
+      </table>
+    </div>
+    ${orphans.length?`<details style="margin-top:10px;"><summary style="cursor:pointer;font-size:13px;font-weight:600;">${orphans.length} invoice(s) in 2B but not in your records</summary>
+      <div style="max-height:160px;overflow:auto;margin-top:6px;"><table style="font-size:12px;"><tr><th>Supplier GSTIN</th><th>Invoice #</th><th style="text-align:right;">Tax</th></tr>
+      ${orphans.map(o=>`<tr><td>${o.gstin}</td><td>${o.invNo}</td><td style="text-align:right;">${fmtMoney(o.tax)}</td></tr>`).join('')}</table></div>
+      <p class="muted" style="font-size:12px;">These appear in your GSTR-2B but you have no matching purchase invoice — you may be missing an entry, or the invoice number differs. Worth checking.</p>
+    </details>`:''}
+    <button class="btn btn-primary" style="width:100%;margin-top:14px;" onclick="applyReconcile2b()">Apply results to invoices</button>
+  `, true);
+}
+
+async function applyReconcile2b(){
+  if(blockedReadOnly()) return;
+  const { results } = window.__recon2b;
+  let applied = 0;
+  for(const r of results){
+    let status;
+    if(r.status==='exact') status='reflected';
+    else if(r.status==='nearmatch') status='not_reflected';  // needs review, keep held
+    else { if(Number(r.inv.gst_amount)<=0) continue; status='not_reflected'; }
+    await sb.from('invoices').update({ gstr2b_status: status, gstr2b_checked_at: new Date().toISOString() }).eq('id', r.inv.id).then(()=>{applied++;},()=>{});
+  }
+  await logActivity(state.company.id, 'gstr2b_reconciled', 'company', state.company.id, {applied});
+  closeModal(); toast(`Applied 2B status to ${applied} invoice(s)`); renderCompanyApp('invoices');
+}
   const { data: i, error } = await sb.from('invoices').select('*, vendors(name)').eq('id', id).single();
   if(error){ toast(error.message, true); return; }
   showModal(`
