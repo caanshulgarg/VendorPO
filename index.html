@@ -3,11 +3,11 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>POFlow — PO & Vendor Invoice Management</title>
+<title>Kiyra — PO & Vendor Invoice Management</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
   /* ============================================================
-     POFlow — "Modern Ledger" design system
+     Kiyra — "Modern Ledger" design system
      Deep ink navy + accountant's green, tabular numerals,
      disciplined hairline structure. Built for finance/procurement
      users who value precision and trust over flash.
@@ -345,7 +345,7 @@ function renderLogin(){
   document.getElementById('root').innerHTML = `
   <div class="login-wrap">
     <div class="card login-card">
-      <div class="brand-lockup"><h2 style="margin:0;">PO<span style="color:var(--primary);">Flow</span></h2></div>
+      <div class="brand-lockup"><h2 style="margin:0;">Kiy<span style="color:var(--primary);">ra</span></h2></div>
       <p class="muted" style="margin-top:2px;">Purchase orders, vendors &amp; invoice approval</p>
       <div class="tabs" style="margin:18px 0 16px;">
         <div class="tab active" id="tab-signin" onclick="switchAuthTab('signin')">Sign in</div>
@@ -497,7 +497,7 @@ async function doVendorSignup(){
 function shell(title, roleLabel, bodyHtml){
   return `
   <header class="topbar">
-    <h1>PO<span class="mark">Flow</span>${title?(' <span style="color:#7d8894;font-weight:400;">/ '+title+'</span>'):''}</h1>
+    <h1>Kiy<span class="mark">ra</span>${title?(' <span style="color:#7d8894;font-weight:400;">/ '+title+'</span>'):''}</h1>
     <div style="display:flex;align-items:center;gap:14px;">
       <span class="who">${roleLabel}</span>
       <button class="btn btn-sm" onclick="signOut()">Sign out</button>
