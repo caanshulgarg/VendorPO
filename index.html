@@ -1332,7 +1332,7 @@ async function renderCompanyApp(tab){
           return `<tr class="${mismatchRow?'row-warn':''}" data-vendor="${(i.vendors?.name||'').replace(/"/g,'&quot;')}" data-status="${i.status}" data-match="${m.status}" data-gst2b="${st2b}" data-amount="${i.total_amount}" data-search="${(i.invoice_number+' '+(i.vendors?.name||'')+' '+(i.purchase_orders?.po_number||'')+' '+i.status).toLowerCase().replace(/"/g,'&quot;')}">
           <td><a href="#" onclick='openInvoiceModal(${JSON.stringify(i.id)});return false;' style="font-weight:600;">${i.invoice_number}</a></td>
           <td>${i.vendors?.name||''}</td><td>${i.purchase_orders?.po_number||'—'}</td>
-          <td>${fmtMoney(i.total_amount)}${Number(i.amount_paid)>0 && Number(i.amount_paid)<Number(i.total_amount)?`<div class="muted">bal ${fmtMoney(Number(i.total_amount)-Number(i.amount_paid))}</div>`:''}</td>
+          <td>${fmtMoney(i.total_amount)}${amountPaidEff(i)>0 && i.status!=='paid'?`<div class="muted" style="color:var(--amber);">paid ${fmtMoney(amountPaidEff(i))} · bal ${fmtMoney(amountDue(i))}</div>`:''}${i.status==='paid'?`<div class="muted" style="color:var(--green);">fully paid</div>`:''}</td>
           <td>${Number(i.gst_amount)>0?fmtMoney(i.gst_amount):'—'}${hold>0?`<div class="muted" style="color:var(--red);">${fmtMoney(hold)} held</div>`:''}</td>
           <td>${isAdmin && !state.readOnly ? `<span class="gst2b-link" onclick='openGst2bQuickMenu(event, ${JSON.stringify(i.id)}, "${st2b}")' title="Click to set GSTR-2B status">${gstr2bBadge(st2b)} <span style="font-size:9px;color:var(--ink-soft);">▾</span></span>` : gstr2bBadge(st2b)}</td>
           <td>${m.status!=='matched' ? `<span title="${matchTip}" style="cursor:help;">${matchBadge(m.status)}</span>` : matchBadge(m.status)}</td>
@@ -1342,7 +1342,8 @@ async function renderCompanyApp(tab){
               <button class="btn-icon btn-icon-green" title="Approve" onclick="quickApprove('${i.id}')">✓</button>
               <button class="btn-icon btn-icon-red" title="Reject" onclick="quickReject('${i.id}')">✗</button>
             ` : ''}
-            ${isAdmin && (i.status==='approved') && !state.readOnly ? `<button class="btn btn-sm btn-green" onclick='markInvoicePaid(${JSON.stringify(i.id)})'>Pay</button>` : ''}
+            ${isAdmin && (i.status==='approved') && amountDue(i)>0.01 && !state.readOnly ? `<button class="btn btn-sm btn-green" onclick='markInvoicePaid(${JSON.stringify(i.id)})'>${amountPaidEff(i)>0?'Add payment':'Pay'}</button>` : ''}
+            ${isAdmin && i.status==='paid' && !state.readOnly ? `<button class="btn btn-sm" onclick='markInvoicePaid(${JSON.stringify(i.id)})'>Payments</button>` : ''}
             <button class="btn-icon" title="More" onclick='openInvoiceRowMenu(event, ${JSON.stringify(i.id)})'>⋯</button>
           </td>
         </tr>`;}).join('') || `<tr><td colspan="9" class="muted">${invErr ? '' : 'No invoices submitted yet.'}</td></tr>`}
@@ -1727,40 +1728,90 @@ async function markInvoicePaid(id){
   if(blockedReadOnly()) return;
   const { data: i, error } = await sb.from('invoices').select('*, vendors(name)').eq('id', id).single();
   if(error){ toast(error.message, true); return; }
+  // Load the actual payment records for this invoice — the true source of what's been paid.
+  const { data: pays } = await sb.from('payments').select('*').eq('invoice_id', id).order('paid_on',{ascending:true});
   const gst = Number(i.gst_amount||0);
   const total = Number(i.total_amount);
   const taxable = Number(i.taxable_value|| (total - gst));
   const st2b = i.gstr2b_status || 'pending';
-  const alreadyPaid = Number(i.amount_paid||0);
+  const paidSum = (pays||[]).reduce((s,p)=>s+Number(p.amount||0),0);
+  const balance = Math.max(0, total - paidSum);
   const reflected = st2b === 'reflected';
-  // suggested "pay now" = full if reflected, else taxable value only
-  const suggested = reflected ? total : taxable;
+  const suggested = reflected ? balance : Math.max(0, taxable - paidSum);
+  const payHistory = (pays||[]).length ? `
+    <div style="margin-top:12px;">
+      <strong style="font-size:13px;">Payments recorded</strong>
+      <table style="font-size:12.5px;margin-top:4px;">
+        <tr><th>Date</th><th style="text-align:right;">Amount</th><th>Reference</th><th></th></tr>
+        ${pays.map(p=>`<tr>
+          <td>${fmtDate(p.paid_on)}</td>
+          <td style="text-align:right;">${fmtMoney(p.amount)}</td>
+          <td class="muted">${p.reference||'—'}</td>
+          <td style="text-align:right;">${!state.readOnly?`<button class="btn-icon btn-icon-red" title="Delete this payment" onclick="deletePayment('${p.id}','${id}')">✗</button>`:''}</td>
+        </tr>`).join('')}
+        <tr style="border-top:2px solid var(--border-strong);"><td><strong>Total paid</strong></td><td style="text-align:right;"><strong>${fmtMoney(paidSum)}</strong></td><td colspan="2"></td></tr>
+      </table>
+    </div>` : '';
   showModal(`
     <span class="close-x" onclick="closeModal()">✕</span>
-    <h3>Record payment</h3>
-    <p class="muted">Invoice ${i.invoice_number} · ${i.vendors?.name||''}</p>
+    <h3>Payment · ${i.invoice_number}</h3>
+    <p class="muted">${i.vendors?.name||''}</p>
     <table style="font-size:13px;margin:10px 0;">
       <tr><td>Invoice total</td><td style="text-align:right;">${fmtMoney(total)}</td></tr>
       <tr><td>Taxable value</td><td style="text-align:right;">${fmtMoney(taxable)}</td></tr>
       <tr><td>GST amount</td><td style="text-align:right;">${fmtMoney(gst)}</td></tr>
       <tr><td>GSTR-2B</td><td style="text-align:right;">${gstr2bBadge(st2b)}</td></tr>
-      ${alreadyPaid>0?`<tr><td>Already paid</td><td style="text-align:right;">${fmtMoney(alreadyPaid)}</td></tr>`:''}
+      <tr><td>Paid so far</td><td style="text-align:right;">${fmtMoney(paidSum)}</td></tr>
+      <tr style="color:${balance>0.01?'var(--red)':'var(--green)'};"><td><strong>Balance due</strong></td><td style="text-align:right;"><strong>${fmtMoney(balance)}</strong></td></tr>
     </table>
-    ${!reflected && gst>0 ? `<div style="background:#f7efe0;border:1px solid #e8d5b0;border-radius:8px;padding:10px;font-size:13px;color:#8a6420;margin-bottom:10px;">
-      This invoice isn't reflected in GSTR-2B yet. You can pay the taxable value now and <strong>hold ${fmtMoney(gst)} of GST</strong> until it reflects, protecting your input tax credit.
-    </div>`:''}
-    <label style="display:block;">Amount to pay now (₹)</label>
-    <input id="pay-amount" type="number" step="0.01" value="${(suggested - alreadyPaid).toFixed(2)}"/>
-    <div style="display:flex;gap:8px;margin-top:6px;">
-      <button class="btn btn-sm" onclick="document.getElementById('pay-amount').value='${(taxable-alreadyPaid).toFixed(2)}'">Taxable only</button>
-      <button class="btn btn-sm" onclick="document.getElementById('pay-amount').value='${(total-alreadyPaid).toFixed(2)}'">Full amount</button>
-    </div>
-    <label style="display:block;margin-top:10px;">Payment date</label>
-    <input id="pay-date" type="date" value="${new Date().toISOString().slice(0,10)}"/>
-    <label style="display:block;margin-top:10px;">Payment reference (UTR / cheque no.) — optional</label>
-    <input id="pay-ref" type="text"/>
-    <button class="btn btn-primary" style="width:100%;margin-top:14px;" onclick="confirmPayment('${id}')">Record payment</button>
+    ${payHistory}
+    ${balance>0.01 ? `
+      ${!reflected && gst>0 ? `<div style="background:var(--amber-soft);border:1px solid #e8d5b0;border-radius:8px;padding:10px;font-size:13px;color:#8a6420;margin:10px 0;">
+        This invoice isn't reflected in GSTR-2B yet. You can pay the taxable value now and <strong>hold ${fmtMoney(gst)} of GST</strong> until it reflects, protecting your input tax credit.
+      </div>`:''}
+      <label style="display:block;margin-top:10px;">Add a payment — amount (₹)</label>
+      <input id="pay-amount" type="number" step="0.01" value="${suggested.toFixed(2)}"/>
+      <div style="display:flex;gap:8px;margin-top:6px;flex-wrap:wrap;">
+        <button class="btn btn-sm" onclick="document.getElementById('pay-amount').value='${Math.max(0,taxable-paidSum).toFixed(2)}'">Taxable only (${fmtMoney(Math.max(0,taxable-paidSum))})</button>
+        <button class="btn btn-sm" onclick="document.getElementById('pay-amount').value='${balance.toFixed(2)}'">Full balance (${fmtMoney(balance)})</button>
+      </div>
+      <label style="display:block;margin-top:10px;">Payment date</label>
+      <input id="pay-date" type="date" value="${new Date().toISOString().slice(0,10)}"/>
+      <label style="display:block;margin-top:10px;">Reference (UTR / cheque no.) — optional</label>
+      <input id="pay-ref" type="text"/>
+      <button class="btn btn-primary" style="width:100%;margin-top:14px;" onclick="confirmPayment('${id}')">Record payment</button>
+    ` : `<div style="background:var(--green-soft);border:1px solid #bfe3cf;border-radius:8px;padding:12px;font-size:13.5px;color:#0c7a43;margin-top:10px;">✓ This invoice is fully paid. To correct a mistake, delete a payment above and the balance will recalculate.</div>`}
   `);
+}
+// Delete a single payment and auto-recalculate the invoice's paid total + status.
+async function deletePayment(paymentId, invoiceId){
+  if(blockedReadOnly()) return;
+  if(!confirm('Delete this payment? The invoice balance and status will recalculate automatically.')) return;
+  const { error: delErr } = await sb.from('payments').delete().eq('id', paymentId);
+  if(delErr){ toast(delErr.message, true); return; }
+  await recalcInvoicePayments(invoiceId);
+  await logActivity(state.company.id, 'payment_deleted', 'invoice', invoiceId, {paymentId});
+  toast('Payment removed — balance recalculated');
+  closeModal();
+  markInvoicePaid(invoiceId); // reopen with fresh numbers
+}
+// Single source of truth: recompute an invoice's amount_paid + status from its
+// actual payment records. Called after any add/delete so everything stays correct.
+async function recalcInvoicePayments(invoiceId){
+  const { data: pays } = await sb.from('payments').select('amount').eq('invoice_id', invoiceId);
+  const { data: inv } = await sb.from('invoices').select('total_amount, status').eq('id', invoiceId).single();
+  const paidSum = (pays||[]).reduce((s,p)=>s+Number(p.amount||0),0);
+  const total = Number(inv.total_amount||0);
+  const fullyPaid = paidSum >= total - 0.01 && total > 0;
+  // If it was paid and now isn't (a payment was deleted), revert status to approved.
+  let status = inv.status;
+  if(fullyPaid) status = 'paid';
+  else if(inv.status === 'paid') status = 'approved'; // was fully paid, now partial → back to approved
+  await sb.from('invoices').update({
+    amount_paid: paidSum,
+    status,
+    paid_at: fullyPaid ? new Date().toISOString() : null
+  }).eq('id', invoiceId);
 }
 async function confirmPayment(id){
   const payNow = parseFloat(document.getElementById('pay-amount').value)||0;
@@ -1768,28 +1819,28 @@ async function confirmPayment(id){
   const dateEl = document.getElementById('pay-date');
   const paidOn = dateEl && dateEl.value ? dateEl.value : new Date().toISOString().slice(0,10);
   if(payNow <= 0){ toast('Enter an amount greater than zero', true); return; }
-  const { data: i } = await sb.from('invoices').select('total_amount, amount_paid, vendor_id').eq('id', id).single();
+  const { data: i } = await sb.from('invoices').select('total_amount, vendor_id').eq('id', id).single();
+  // Guard against overpayment: sum existing payments first.
+  const { data: existing } = await sb.from('payments').select('amount').eq('invoice_id', id);
+  const already = (existing||[]).reduce((s,p)=>s+Number(p.amount||0),0);
   const total = Number(i.total_amount);
-  const newPaid = Number(i.amount_paid||0) + payNow;
-  const fullyPaid = newPaid >= total - 0.01;
+  if(already + payNow > total + 0.01){
+    if(!confirm(`This payment (${fmtMoney(payNow)}) plus what's already paid (${fmtMoney(already)}) exceeds the invoice total (${fmtMoney(total)}). Record it anyway?`)) return;
+  }
   // 1. record the dated payment in the payments log
   const { error: payErr } = await sb.from('payments').insert({
     company_id: state.company.id, invoice_id: id, vendor_id: i.vendor_id,
     amount: payNow, paid_on: paidOn, reference: ref
   });
   if(payErr){ toast('Could not record payment: '+payErr.message, true); return; }
-  // 2. update the invoice running total + status
-  const patch = {
-    amount_paid: newPaid,
-    payment_reference: ref,
-    status: fullyPaid ? 'paid' : 'approved',
-    paid_at: fullyPaid ? new Date().toISOString() : null
-  };
-  const { error } = await sb.from('invoices').update(patch).eq('id', id);
-  if(error){ toast(error.message, true); return; }
+  // 2. recalculate the invoice totals + status from all payment records (single source of truth)
+  await recalcInvoicePayments(id);
+  await sb.from('invoices').update({ payment_reference: ref }).eq('id', id);
+  const newPaid = already + payNow;
+  const fullyPaid = newPaid >= total - 0.01;
   await logActivity(state.company.id, fullyPaid?'invoice_paid':'invoice_part_paid', 'invoice', id, {payNow, ref, paidOn});
   closeModal();
-  toast(fullyPaid ? 'Invoice fully paid' : `Part payment recorded · balance ${fmtMoney(total-newPaid)}`);
+  toast(fullyPaid ? 'Invoice fully paid' : `Part payment recorded · balance ${fmtMoney(Math.max(0,total-newPaid))}`);
   renderCompanyApp('invoices');
 }
 
