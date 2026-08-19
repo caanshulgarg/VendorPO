@@ -64,6 +64,20 @@
   .btn-green{background:var(--green);color:#fff !important;border:1px solid var(--green);box-shadow:0 2px 8px -2px rgba(22,163,74,0.45);}
   .btn-green:hover{background:#12833c;color:#fff !important;transform:translateY(-1px);}
   .btn-sm{padding:6px 12px;font-size:12px;border-radius:8px;font-weight:600;box-shadow:none;}
+  /* icon action buttons for inline row actions */
+  .btn-icon{width:30px;height:30px;padding:0;border-radius:8px;border:1px solid var(--border-strong);background:#fff;cursor:pointer;font-size:14px;font-weight:700;line-height:1;display:inline-flex;align-items:center;justify-content:center;transition:all .13s;color:var(--ink-soft);vertical-align:middle;}
+  .btn-icon:hover{border-color:var(--primary);color:var(--primary);background:var(--primary-soft);}
+  .btn-icon-green{color:var(--green);border-color:#bfe3cf;background:var(--green-soft);}
+  .btn-icon-green:hover{background:var(--green);color:#fff;border-color:var(--green);}
+  .btn-icon-red{color:var(--red);border-color:#f3c4bf;background:var(--red-soft);}
+  .btn-icon-red:hover{background:var(--red);color:#fff;border-color:var(--red);}
+  tr.row-warn{background:#fff9ef;}
+  tr.row-warn:hover{background:#fef3e0;}
+  tr.row-warn td:first-child{box-shadow:inset 3px 0 0 var(--amber);}
+  /* row action menu popover */
+  .row-menu{position:fixed;background:#fff;border:1px solid var(--border);border-radius:10px;box-shadow:var(--shadow-lg);padding:6px;z-index:60;min-width:150px;}
+  .row-menu button{display:block;width:100%;text-align:left;padding:8px 12px;border:none;background:none;font-size:13px;border-radius:7px;cursor:pointer;color:var(--ink);font-family:inherit;}
+  .row-menu button:hover{background:var(--primary-soft);color:var(--primary);}
 
   /* cards */
   .card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:22px;margin-bottom:18px;box-shadow:var(--shadow);transition:box-shadow .18s;}
@@ -1241,13 +1255,22 @@ async function renderCompanyApp(tab){
     const totalHoldSum = (invs||[]).reduce((s,i)=>s+totalHold(i),0);
     const invVendors = [...new Set((invs||[]).map(i=>i.vendors?.name).filter(Boolean))];
     const invStatuses = [...new Set((invs||[]).map(i=>i.status).filter(Boolean))];
+    const levels = state.company.approval_levels || 1;
+    // invoices this user can act on right now (level-aware)
+    const pendingForMe = (invs||[]).filter(i=>['submitted','under_review'].includes(i.status) &&
+      (state.role==='company_admin' || (state.role==='approver' && state.profile.approval_level===i.current_approval_level)));
     const holdBanner = totalHoldSum > 0
-      ? `<div style="background:#f8eded;border:1px solid #e4c4c4;border-radius:10px;padding:12px 14px;margin:6px 0;font-size:13.5px;color:#8a2b2b;">
-          <strong>⚠ On hold:</strong> ${fmtMoney(totalHoldSum)} is currently held across invoices — GST awaiting GSTR-2B reflection and any manual holds. Vendors can see the held amount and reason on their side.
+      ? `<div style="background:var(--red-soft);border:1px solid #f3b6b0;border-radius:10px;padding:12px 14px;margin:6px 0;font-size:13.5px;color:#8a2b2b;">
+          <strong>⚠ On hold:</strong> ${fmtMoney(totalHoldSum)} is currently held across invoices — GST awaiting GSTR-2B reflection and any manual holds.
+        </div>` : '';
+    const pendingBanner = pendingForMe.length
+      ? `<div style="background:var(--primary-soft);border:1px solid #bcd4f2;border-radius:10px;padding:10px 14px;margin:6px 0;font-size:13.5px;color:var(--ink);display:flex;justify-content:space-between;align-items:center;">
+          <span><strong>${pendingForMe.length} invoice${pendingForMe.length===1?'':'s'}</strong> awaiting your approval${pendingForMe.some(i=>matchInvoiceToPO(i,i.purchase_orders).status!=='matched')?` · <span style="color:var(--amber);">${pendingForMe.filter(i=>matchInvoiceToPO(i,i.purchase_orders).status!=='matched').length} with PO mismatch</span>`:''}</span>
+          ${!state.readOnly?`<button class="btn btn-sm btn-green" onclick="approveAllMatched()">Approve all matched</button>`:''}
         </div>` : '';
     body += `<div class="card">
       <div style="display:flex;justify-content:space-between;align-items:center;">
-        <h3 style="margin:0;">Invoices</h3>
+        <h3 style="margin:0;">Invoices / Approvals</h3>
         <div style="display:flex;gap:6px;">
           <button class="btn btn-sm" onclick="exportInvoices('csv')">CSV</button>
           <button class="btn btn-sm" onclick="exportInvoices('xlsx')">Excel</button>
@@ -1255,34 +1278,45 @@ async function renderCompanyApp(tab){
         </div>
       </div>
       ${invErr ? `<p style="color:var(--red);">Couldn't load invoices: ${invErr.message}</p>` : ''}
+      ${pendingBanner}
       ${holdBanner}
       ${buildFilterBar('inv-table', { search:true, amount:true, selects:[
         {key:'vendor', label:'Vendor', options: invVendors},
         {key:'status', label:'Status', options: invStatuses},
+        {key:'match', label:'PO Match', options:[
+          {value:'matched',label:'Matched'},{value:'partial',label:'Partial'},{value:'unmatched',label:'Unmatched'}
+        ]},
         {key:'gst2b', label:'GSTR-2B', options:[
           {value:'reflected',label:'In 2B'},{value:'not_reflected',label:'Not in 2B'},{value:'pending',label:'2B pending'}
         ]}
       ]})}
       <table id="inv-table" style="margin-top:6px;">
-        <tr><th>Invoice #</th><th>Vendor</th><th>PO</th><th>Amount</th><th>GST (ITC)</th><th>GSTR-2B</th><th>PO Match</th><th>Status</th><th>Submitted</th><th></th></tr>
+        <tr><th>Invoice #</th><th>Vendor</th><th>PO</th><th>Amount</th><th>GST (ITC)</th><th>GSTR-2B</th><th>PO Match</th><th>Status</th><th>Action</th></tr>
         ${(invs||[]).map(i=>{
           const m = matchInvoiceToPO(i, i.purchase_orders);
           const hold = itcOnHold(i);
           const st2b = i.gstr2b_status || 'pending';
-          return `<tr data-vendor="${(i.vendors?.name||'').replace(/"/g,'&quot;')}" data-status="${i.status}" data-gst2b="${st2b}" data-amount="${i.total_amount}" data-search="${(i.invoice_number+' '+(i.vendors?.name||'')+' '+(i.purchase_orders?.po_number||'')+' '+i.status).toLowerCase().replace(/"/g,'&quot;')}">
-          <td>${i.invoice_number}</td><td>${i.vendors?.name||''}</td><td>${i.purchase_orders?.po_number||'—'}</td>
-          <td>${fmtMoney(i.total_amount)}${Number(i.amount_paid)>0 && Number(i.amount_paid)<Number(i.total_amount)?`<div class="muted">paid ${fmtMoney(i.amount_paid)}, bal ${fmtMoney(Number(i.total_amount)-Number(i.amount_paid))}</div>`:''}</td>
-          <td>${Number(i.gst_amount)>0?fmtMoney(i.gst_amount):'—'}${hold>0?`<div class="muted" style="color:#b23b3b;">${fmtMoney(hold)} GST held</div>`:''}${manualHold(i)>0?`<div class="muted" style="color:#b23b3b;">${fmtMoney(manualHold(i))} held: ${(i.manual_hold_reason||'other').slice(0,24)}</div>`:''}</td>
+          const canActNow = ['submitted','under_review'].includes(i.status) &&
+            (state.role==='company_admin' || (state.role==='approver' && state.profile.approval_level===i.current_approval_level));
+          const mismatchRow = canActNow && m.status!=='matched';
+          const matchTip = m.reasons.join(' ').replace(/"/g,'&quot;');
+          return `<tr class="${mismatchRow?'row-warn':''}" data-vendor="${(i.vendors?.name||'').replace(/"/g,'&quot;')}" data-status="${i.status}" data-match="${m.status}" data-gst2b="${st2b}" data-amount="${i.total_amount}" data-search="${(i.invoice_number+' '+(i.vendors?.name||'')+' '+(i.purchase_orders?.po_number||'')+' '+i.status).toLowerCase().replace(/"/g,'&quot;')}">
+          <td><a href="#" onclick='openInvoiceModal(${JSON.stringify(i.id)});return false;' style="font-weight:600;">${i.invoice_number}</a></td>
+          <td>${i.vendors?.name||''}</td><td>${i.purchase_orders?.po_number||'—'}</td>
+          <td>${fmtMoney(i.total_amount)}${Number(i.amount_paid)>0 && Number(i.amount_paid)<Number(i.total_amount)?`<div class="muted">bal ${fmtMoney(Number(i.total_amount)-Number(i.amount_paid))}</div>`:''}</td>
+          <td>${Number(i.gst_amount)>0?fmtMoney(i.gst_amount):'—'}${hold>0?`<div class="muted" style="color:var(--red);">${fmtMoney(hold)} held</div>`:''}</td>
           <td>${gstr2bBadge(st2b)}</td>
-          <td>${matchBadge(m.status)}</td>
-          <td>${badge(i.status)}${i.status==='paid'&&i.payment_reference?`<div class="muted">Ref: ${i.payment_reference}</div>`:''}</td><td class="muted">${fmtDate(i.submitted_at)}</td>
+          <td>${m.status!=='matched' ? `<span title="${matchTip}" style="cursor:help;">${matchBadge(m.status)}</span>` : matchBadge(m.status)}</td>
+          <td>${badge(i.status)}</td>
           <td class="row-actions">
-            <button class="btn btn-sm" onclick='openInvoiceModal(${JSON.stringify(i.id)})'>Review</button>
-            ${isAdmin ? `<button class="btn btn-sm" onclick='openGstr2bModal(${JSON.stringify(i.id)})'>2B</button>` : ''}
-            ${isAdmin ? `<button class="btn btn-sm" onclick='openHoldModal(${JSON.stringify(i.id)})'>Hold</button>` : ''}
-            ${isAdmin && (i.status==='approved') ? `<button class="btn btn-sm btn-green" onclick='markInvoicePaid(${JSON.stringify(i.id)})'>Pay</button>` : ''}
+            ${canActNow && !state.readOnly ? `
+              <button class="btn-icon btn-icon-green" title="Approve" onclick="quickApprove('${i.id}')">✓</button>
+              <button class="btn-icon btn-icon-red" title="Reject" onclick="quickReject('${i.id}')">✗</button>
+            ` : ''}
+            ${isAdmin && (i.status==='approved') && !state.readOnly ? `<button class="btn btn-sm btn-green" onclick='markInvoicePaid(${JSON.stringify(i.id)})'>Pay</button>` : ''}
+            <button class="btn-icon" title="More" onclick='openInvoiceRowMenu(event, ${JSON.stringify(i.id)})'>⋯</button>
           </td>
-        </tr>`;}).join('') || `<tr><td colspan="10" class="muted">${invErr ? '' : 'No invoices submitted yet.'}</td></tr>`}
+        </tr>`;}).join('') || `<tr><td colspan="9" class="muted">${invErr ? '' : 'No invoices submitted yet.'}</td></tr>`}
       </table>
     </div>`;
   }
@@ -3149,6 +3183,78 @@ async function actOnInvoice(id, action){
   await logActivity(state.company.id, `invoice_${action}`, 'invoice', id, {comments});
   closeModal(); toast('Recorded'); renderCompanyApp('invoices');
 }
+
+// ---- One-click inline approval (no modal) ----
+async function quickApprove(id){
+  if(blockedReadOnly()) return;
+  const { data: inv } = await sb.from('invoices').select('*, purchase_orders(*)').eq('id', id).single();
+  const levels = state.company.approval_levels || 1;
+  const m = matchInvoiceToPO(inv, inv.purchase_orders);
+  // If mismatched, confirm once (single extra click only when it matters).
+  if(m.status !== 'matched'){
+    if(!confirm(`This invoice is ${m.status} against its PO:\n\n${m.reasons.join('\n')}\n\nApprove anyway?`)) return;
+  }
+  const comments = m.status==='matched' ? 'Approved (matched)' : `Approved despite ${m.status}: ${m.reasons.join('; ')}`;
+  await sb.from('approvals').insert({ invoice_id:id, approver_id:state.profile.id, level:inv.current_approval_level, action:'approved', comments }).then(()=>{},()=>{});
+  if(inv.current_approval_level >= levels){
+    await sb.from('invoices').update({status:'approved'}).eq('id', id);
+  } else {
+    await sb.from('invoices').update({status:'under_review', current_approval_level: inv.current_approval_level+1}).eq('id', id);
+  }
+  await logActivity(state.company.id, 'invoice_approved', 'invoice', id, {inline:true, match:m.status});
+  toast('Approved'); renderCompanyApp('invoices');
+}
+async function quickReject(id){
+  if(blockedReadOnly()) return;
+  const reason = prompt('Reason for rejection (shown to vendor):');
+  if(reason===null) return; // cancelled
+  const { data: inv } = await sb.from('invoices').select('current_approval_level').eq('id', id).single();
+  await sb.from('approvals').insert({ invoice_id:id, approver_id:state.profile.id, level:inv.current_approval_level, action:'rejected', comments:reason }).then(()=>{},()=>{});
+  await sb.from('invoices').update({status:'rejected', rejection_reason: reason||null}).eq('id', id);
+  await logActivity(state.company.id, 'invoice_rejected', 'invoice', id, {inline:true, reason});
+  toast('Rejected'); renderCompanyApp('invoices');
+}
+// Approve every matched invoice awaiting this user — bulk, one click.
+async function approveAllMatched(){
+  if(blockedReadOnly()) return;
+  const { data: invs } = await sb.from('invoices').select('*, purchase_orders(*)').eq('company_id',state.company.id);
+  const levels = state.company.approval_levels || 1;
+  const targets = (invs||[]).filter(i=>['submitted','under_review'].includes(i.status) &&
+    (state.role==='company_admin' || (state.role==='approver' && state.profile.approval_level===i.current_approval_level)) &&
+    matchInvoiceToPO(i, i.purchase_orders).status==='matched');
+  if(!targets.length){ toast('No fully-matched invoices to approve', true); return; }
+  if(!confirm(`Approve ${targets.length} fully-matched invoice(s) awaiting you? Mismatched ones are skipped and stay for individual review.`)) return;
+  for(const inv of targets){
+    await sb.from('approvals').insert({ invoice_id:inv.id, approver_id:state.profile.id, level:inv.current_approval_level, action:'approved', comments:'Approved (matched, bulk)' }).then(()=>{},()=>{});
+    if(inv.current_approval_level >= levels){
+      await sb.from('invoices').update({status:'approved'}).eq('id', inv.id);
+    } else {
+      await sb.from('invoices').update({status:'under_review', current_approval_level: inv.current_approval_level+1}).eq('id', inv.id);
+    }
+    await logActivity(state.company.id, 'invoice_approved', 'invoice', inv.id, {bulk:true});
+  }
+  toast(`Approved ${targets.length} invoice(s)`); renderCompanyApp('invoices');
+}
+// Row "⋯" menu — secondary actions without cluttering the row.
+function openInvoiceRowMenu(ev, id){
+  ev.stopPropagation();
+  document.querySelectorAll('.row-menu').forEach(m=>m.remove());
+  const menu = document.createElement('div');
+  menu.className = 'row-menu';
+  const admin = state.role==='company_admin';
+  const ro = state.readOnly;
+  menu.innerHTML = `
+    <button onclick='openInvoiceModal(${JSON.stringify(id)});closeRowMenu();'>Review details</button>
+    ${admin&&!ro?`<button onclick='openGstr2bModal(${JSON.stringify(id)});closeRowMenu();'>Set GSTR-2B status</button>`:''}
+    ${admin&&!ro?`<button onclick='openHoldModal(${JSON.stringify(id)});closeRowMenu();'>Place / edit hold</button>`:''}
+  `;
+  document.body.appendChild(menu);
+  const r = ev.target.getBoundingClientRect();
+  menu.style.top = (r.bottom+4)+'px';
+  menu.style.left = Math.min(r.left, window.innerWidth-170)+'px';
+  setTimeout(()=>document.addEventListener('click', closeRowMenu, {once:true}), 0);
+}
+function closeRowMenu(){ document.querySelectorAll('.row-menu').forEach(m=>m.remove()); }
 
 // ============================================================
 // VENDOR APP
