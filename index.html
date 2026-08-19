@@ -882,15 +882,94 @@ function closeSidebar(){
 // ============================================================
 // SUPERADMIN VIEW
 // ============================================================
+// ============================================================
+// CA-FIRM MULTI-CLIENT COCKPIT
+// Practice-level view across ALL client companies at once.
+// ============================================================
+async function renderCockpit(companies){
+  companies = companies || [];
+  // Pull invoices and POs across every company in one query each (superadmin RLS allows all).
+  const { data: allInvs } = await sb.from('invoices').select('company_id,status,total_amount,amount_paid,gst_amount,gstr2b_status,manual_hold_amount,current_approval_level');
+  const { data: allPos } = await sb.from('purchase_orders').select('company_id,status,total_amount');
+
+  // Aggregate per company
+  const byCo = {};
+  companies.forEach(c=>{ byCo[c.id] = { c, gstAtRisk:0, pendingApprovals:0, unpaidDue:0, poValue:0, invCount:0, notChecked:0 }; });
+  (allInvs||[]).forEach(i=>{
+    const b = byCo[i.company_id]; if(!b) return;
+    b.invCount++;
+    // GST at risk = gst not reflected in 2B and not yet paid
+    const gst = Number(i.gst_amount||0);
+    const paid = i.status==='paid' ? Number(i.total_amount||0) : Number(i.amount_paid||0);
+    const st2b = i.gstr2b_status || 'pending';
+    if(st2b!=='reflected' && gst>0){ b.gstAtRisk += Math.min(gst, Math.max(0, Number(i.total_amount||0)-paid)); }
+    if(st2b==='pending' && gst>0) b.notChecked++;
+    if(['submitted','under_review'].includes(i.status)) b.pendingApprovals++;
+    if(i.status!=='paid'){ b.unpaidDue += Math.max(0, Number(i.total_amount||0) - Number(i.amount_paid||0) - Number(i.manual_hold_amount||0)); }
+  });
+  (allPos||[]).forEach(p=>{ const b=byCo[p.company_id]; if(b) b.poValue += Number(p.total_amount||0); });
+
+  // Firm-wide totals
+  const totGstRisk = Object.values(byCo).reduce((s,b)=>s+b.gstAtRisk,0);
+  const totPending = Object.values(byCo).reduce((s,b)=>s+b.pendingApprovals,0);
+  const totDue = Object.values(byCo).reduce((s,b)=>s+b.unpaidDue,0);
+  // Trials expiring within 5 days
+  const now = new Date();
+  const expiringSoon = companies.filter(c=>c.plan==='trial' && c.plan_status==='trial' && c.trial_ends_at &&
+    (new Date(c.trial_ends_at)-now)/(1000*60*60*24) <= 5 && new Date(c.trial_ends_at) >= now);
+  const expired = companies.filter(c=>c.plan_status==='expired');
+
+  // Rank clients needing attention (by GST at risk + pending)
+  const ranked = Object.values(byCo).sort((a,b)=> (b.gstAtRisk+b.pendingApprovals*1000) - (a.gstAtRisk+a.pendingApprovals*1000));
+
+  const attentionBanner = (expiringSoon.length || expired.length) ? `
+    <div style="background:var(--amber-soft);border:1px solid #e8d5b0;border-radius:12px;padding:14px 18px;margin-bottom:16px;font-size:13.5px;">
+      ${expiringSoon.length?`<strong style="color:#8a6420;">${expiringSoon.length} trial${expiringSoon.length>1?'s':''} expiring within 5 days:</strong> ${expiringSoon.map(c=>c.name).join(', ')}. `:''}
+      ${expired.length?`<strong style="color:var(--red);">${expired.length} expired (read-only):</strong> ${expired.map(c=>c.name).join(', ')}.`:''}
+    </div>` : '';
+
+  return `
+    <div class="eyebrow">Practice cockpit</div>
+    <p class="muted" style="margin:2px 0 14px;">Live view across all ${companies.length} client${companies.length===1?'':'s'} — GST exposure, approvals pending, and who needs attention.</p>
+    ${attentionBanner}
+    <div class="grid grid-4" style="margin-bottom:20px;">
+      <div class="kpi red"><div class="kpi-accent"></div><div class="kpi-label">GST / ITC at risk (all clients)</div><div class="kpi-value">${fmtMoney(totGstRisk)}</div><div class="kpi-sub">not yet reflected in 2B</div></div>
+      <div class="kpi amber"><div class="kpi-accent"></div><div class="kpi-label">Invoices awaiting approval</div><div class="kpi-value">${totPending}</div><div class="kpi-sub">across all clients</div></div>
+      <div class="kpi blue"><div class="kpi-accent"></div><div class="kpi-label">Total payables outstanding</div><div class="kpi-value">${fmtMoney(totDue)}</div><div class="kpi-sub">unpaid, net of holds</div></div>
+      <div class="kpi"><div class="kpi-accent"></div><div class="kpi-label">Active clients</div><div class="kpi-value">${companies.filter(c=>c.status==='active').length}</div><div class="kpi-sub">${companies.filter(c=>c.plan==='trial').length} on trial</div></div>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0;">Client health — who needs attention</h3>
+      <p class="muted" style="font-size:12.5px;margin:4px 0 10px;">Sorted by GST at risk and pending approvals. Click a client to manage them.</p>
+      <table>
+        <tr><th>Client</th><th>Plan</th><th style="text-align:right;">GST at risk</th><th style="text-align:right;">Pending approvals</th><th style="text-align:right;">Payables due</th><th style="text-align:right;">2B not checked</th><th></th></tr>
+        ${ranked.map(b=>{
+          const attention = b.gstAtRisk>0 || b.pendingApprovals>0 || b.notChecked>0;
+          return `<tr>
+            <td style="font-weight:600;">${b.c.name}${b.c.plan_status==='expired'?' <span class="badge badge-rejected">expired</span>':''}</td>
+            <td style="text-transform:capitalize;">${b.c.plan||'trial'}</td>
+            <td style="text-align:right;color:${b.gstAtRisk>0?'var(--red)':'var(--ink-soft)'};font-weight:${b.gstAtRisk>0?'600':'400'};">${fmtMoney(b.gstAtRisk)}</td>
+            <td style="text-align:right;">${b.pendingApprovals>0?`<span style="color:var(--amber);font-weight:600;">${b.pendingApprovals}</span>`:'—'}</td>
+            <td style="text-align:right;">${fmtMoney(b.unpaidDue)}</td>
+            <td style="text-align:right;">${b.notChecked>0?`<span class="muted">${b.notChecked}</span>`:'—'}</td>
+            <td class="row-actions"><button class="btn btn-sm" onclick='openCompanyDetail(${JSON.stringify(b.c.id)})'>Manage</button></td>
+          </tr>`;
+        }).join('') || '<tr><td colspan="7" class="muted">No clients yet. Add your first company from the Companies tab.</td></tr>'}
+      </table>
+    </div>`;
+}
+
 async function renderSuperadmin(tab){
-  state.activeTab = tab || state.activeTab || 'companies';
+  state.activeTab = tab || state.activeTab || 'cockpit';
   try { history.replaceState(null, '', '#' + state.activeTab); } catch(e){}
   const { data: companies } = await sb.from('companies').select('*').order('created_at', {ascending:false});
 
-  const saTabs = [['companies','Companies'],['activity','Global Activity']];
+  const saTabs = [['cockpit','Cockpit'],['companies','Companies'],['activity','Global Activity']];
   let body = '';
 
-  if(state.activeTab === 'companies'){
+  if(state.activeTab === 'cockpit'){
+    body += await renderCockpit(companies);
+  } else if(state.activeTab === 'companies'){
     const active = companies.filter(c=>c.status==='active').length;
     const byPlan = {};
     companies.forEach(c=>{ byPlan[c.plan||'trial'] = (byPlan[c.plan||'trial']||0)+1; });
