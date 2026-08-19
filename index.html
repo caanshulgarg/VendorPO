@@ -371,11 +371,19 @@ function gstr2bBadge(status){
   const s = status || 'pending';
   return `<span class="badge badge-${map[s]}">${label[s]}</span>`;
 }
-// GST amount considered "on hold" when not yet reflected in 2B
+// GST amount considered "on hold" — the unpaid balance when not reflected in 2B.
+// If the invoice is reflected in 2B, nothing is held.
+// Otherwise the held amount is the still-unpaid balance, capped at the GST amount
+// (you may have paid the taxable value and be holding just the GST).
 function itcOnHold(inv){
   const st = inv.gstr2b_status || 'pending';
   if(st === 'reflected') return 0;
-  return Number(inv.gst_amount || 0);
+  const gst = Number(inv.gst_amount || 0);
+  const total = Number(inv.total_amount || 0);
+  const paid = Number(inv.amount_paid || 0);
+  const balance = Math.max(0, total - paid);
+  // hold is whichever is smaller: the outstanding balance, or the GST amount
+  return gst > 0 ? Math.min(balance, gst) : 0;
 }
 async function logActivity(companyId, action, entityType, entityId, details){
   try{
@@ -440,17 +448,20 @@ async function resolveRole(){
   const uid = state.session.user.id;
   const errors = [];
 
+  // Restore the tab the user was on before a refresh (from the URL hash).
+  const hashTab = (location.hash || '').replace('#','').trim() || null;
+
   let { data: sa, error: saErr } = await sb.from('superadmins').select('*').eq('auth_user_id', uid).maybeSingle();
   if(saErr) errors.push('superadmins: '+saErr.message);
-  if(sa){ state.role='superadmin'; state.profile=sa; renderSuperadmin(); return; }
+  if(sa){ state.role='superadmin'; state.profile=sa; renderSuperadmin(hashTab); return; }
 
   let { data: cu, error: cuErr } = await sb.from('company_users').select('*, companies(*)').eq('auth_user_id', uid).maybeSingle();
   if(cuErr) errors.push('company_users: '+cuErr.message);
-  if(cu){ state.role = cu.role; state.profile = cu; state.company = cu.companies; await loadPlanLimits(); renderCompanyApp(); return; }
+  if(cu){ state.role = cu.role; state.profile = cu; state.company = cu.companies; await loadPlanLimits(); renderCompanyApp(hashTab); return; }
 
   let { data: v, error: vErr } = await sb.from('vendors').select('*, companies(*)').eq('auth_user_id', uid).maybeSingle();
   if(vErr) errors.push('vendors: '+vErr.message);
-  if(v){ state.role='vendor'; state.profile=v; state.company=v.companies; renderVendorApp(); return; }
+  if(v){ state.role='vendor'; state.profile=v; state.company=v.companies; renderVendorApp(hashTab); return; }
 
   // logged in but no role row found yet (or a query above errored — surface it so it's diagnosable)
   document.getElementById('root').innerHTML = `<div class="login-wrap"><div class="card login-card" style="width:480px;">
@@ -640,6 +651,7 @@ function shell(title, roleLabel, bodyHtml){
 // ============================================================
 async function renderSuperadmin(tab){
   state.activeTab = tab || state.activeTab || 'companies';
+  try { history.replaceState(null, '', '#' + state.activeTab); } catch(e){}
   const { data: companies } = await sb.from('companies').select('*').order('created_at', {ascending:false});
 
   let body = `<div class="tabs">
@@ -808,6 +820,8 @@ async function updateApprovalLevels(id){
 // ============================================================
 async function renderCompanyApp(tab){
   state.activeTab = tab || state.activeTab || 'dashboard';
+  // Persist the active tab in the URL so a refresh stays on the same page.
+  try { history.replaceState(null, '', '#' + state.activeTab); } catch(e){}
   const cid = state.company.id;
   const isAdmin = state.role === 'company_admin';
 
@@ -819,7 +833,7 @@ async function renderCompanyApp(tab){
 
   if(state.activeTab === 'dashboard'){
     const { data: pos } = await sb.from('purchase_orders').select('id,status,total_amount,created_at,vendor_id,vendors(name)').eq('company_id',cid);
-    const { data: invs } = await sb.from('invoices').select('id,status,total_amount,submitted_at,vendor_id,gstr2b_status,gst_amount').eq('company_id',cid);
+    const { data: invs } = await sb.from('invoices').select('id,status,total_amount,submitted_at,vendor_id,gstr2b_status,gst_amount,amount_paid').eq('company_id',cid);
     const { data: vendors } = await sb.from('vendors').select('id,name,status').eq('company_id',cid);
     const p = state.plan || {};
     const uCount = await countRows('company_users');
@@ -1027,8 +1041,8 @@ async function renderCompanyApp(tab){
           const st2b = i.gstr2b_status || 'pending';
           return `<tr data-vendor="${(i.vendors?.name||'').replace(/"/g,'&quot;')}" data-status="${i.status}" data-gst2b="${st2b}" data-amount="${i.total_amount}" data-search="${(i.invoice_number+' '+(i.vendors?.name||'')+' '+(i.purchase_orders?.po_number||'')+' '+i.status).toLowerCase().replace(/"/g,'&quot;')}">
           <td>${i.invoice_number}</td><td>${i.vendors?.name||''}</td><td>${i.purchase_orders?.po_number||'—'}</td>
-          <td>${fmtMoney(i.total_amount)}</td>
-          <td>${Number(i.gst_amount)>0?fmtMoney(i.gst_amount):'—'}${hold>0?`<div class="muted" style="color:#b23b3b;">on hold</div>`:''}</td>
+          <td>${fmtMoney(i.total_amount)}${Number(i.amount_paid)>0 && Number(i.amount_paid)<Number(i.total_amount)?`<div class="muted">paid ${fmtMoney(i.amount_paid)}, bal ${fmtMoney(Number(i.total_amount)-Number(i.amount_paid))}</div>`:''}</td>
+          <td>${Number(i.gst_amount)>0?fmtMoney(i.gst_amount):'—'}${hold>0?`<div class="muted" style="color:#b23b3b;">${fmtMoney(hold)} on hold</div>`:''}</td>
           <td>${gstr2bBadge(st2b)}</td>
           <td>${matchBadge(m.status)}</td>
           <td>${badge(i.status)}${i.status==='paid'&&i.payment_reference?`<div class="muted">Ref: ${i.payment_reference}</div>`:''}</td><td class="muted">${fmtDate(i.submitted_at)}</td>
@@ -1236,12 +1250,63 @@ async function actOnPO(id, action){
   closeModal(); toast('Recorded'); renderCompanyApp('pos');
 }
 
-// ---- Mark invoice paid ----
+// ---- Mark invoice paid (with option to hold GST until 2B) ----
 async function markInvoicePaid(id){
-  const ref = prompt('Payment reference (UTR / cheque no.) — optional:') || null;
-  await sb.from('invoices').update({status:'paid', payment_reference: ref, paid_at: new Date().toISOString()}).eq('id', id);
-  await logActivity(state.company.id, 'invoice_paid', 'invoice', id, {ref});
-  toast('Marked as paid'); renderCompanyApp('invoices');
+  const { data: i, error } = await sb.from('invoices').select('*, vendors(name)').eq('id', id).single();
+  if(error){ toast(error.message, true); return; }
+  const gst = Number(i.gst_amount||0);
+  const total = Number(i.total_amount);
+  const taxable = Number(i.taxable_value|| (total - gst));
+  const st2b = i.gstr2b_status || 'pending';
+  const alreadyPaid = Number(i.amount_paid||0);
+  const reflected = st2b === 'reflected';
+  // suggested "pay now" = full if reflected, else taxable value only
+  const suggested = reflected ? total : taxable;
+  showModal(`
+    <span class="close-x" onclick="closeModal()">✕</span>
+    <h3>Record payment</h3>
+    <p class="muted">Invoice ${i.invoice_number} · ${i.vendors?.name||''}</p>
+    <table style="font-size:13px;margin:10px 0;">
+      <tr><td>Invoice total</td><td style="text-align:right;">${fmtMoney(total)}</td></tr>
+      <tr><td>Taxable value</td><td style="text-align:right;">${fmtMoney(taxable)}</td></tr>
+      <tr><td>GST amount</td><td style="text-align:right;">${fmtMoney(gst)}</td></tr>
+      <tr><td>GSTR-2B</td><td style="text-align:right;">${gstr2bBadge(st2b)}</td></tr>
+      ${alreadyPaid>0?`<tr><td>Already paid</td><td style="text-align:right;">${fmtMoney(alreadyPaid)}</td></tr>`:''}
+    </table>
+    ${!reflected && gst>0 ? `<div style="background:#f7efe0;border:1px solid #e8d5b0;border-radius:8px;padding:10px;font-size:13px;color:#8a6420;margin-bottom:10px;">
+      This invoice isn't reflected in GSTR-2B yet. You can pay the taxable value now and <strong>hold ${fmtMoney(gst)} of GST</strong> until it reflects, protecting your input tax credit.
+    </div>`:''}
+    <label style="display:block;">Amount to pay now (₹)</label>
+    <input id="pay-amount" type="number" step="0.01" value="${(suggested - alreadyPaid).toFixed(2)}"/>
+    <div style="display:flex;gap:8px;margin-top:6px;">
+      <button class="btn btn-sm" onclick="document.getElementById('pay-amount').value='${(taxable-alreadyPaid).toFixed(2)}'">Taxable only</button>
+      <button class="btn btn-sm" onclick="document.getElementById('pay-amount').value='${(total-alreadyPaid).toFixed(2)}'">Full amount</button>
+    </div>
+    <label style="display:block;margin-top:10px;">Payment reference (UTR / cheque no.) — optional</label>
+    <input id="pay-ref" type="text"/>
+    <button class="btn btn-primary" style="width:100%;margin-top:14px;" onclick="confirmPayment('${id}')">Record payment</button>
+  `);
+}
+async function confirmPayment(id){
+  const payNow = parseFloat(document.getElementById('pay-amount').value)||0;
+  const ref = document.getElementById('pay-ref').value.trim() || null;
+  const { data: i } = await sb.from('invoices').select('total_amount, amount_paid').eq('id', id).single();
+  const total = Number(i.total_amount);
+  const newPaid = Number(i.amount_paid||0) + payNow;
+  // fully paid only when the whole invoice is settled; otherwise it stays approved with a balance
+  const fullyPaid = newPaid >= total - 0.01;
+  const patch = {
+    amount_paid: newPaid,
+    payment_reference: ref,
+    status: fullyPaid ? 'paid' : 'approved',
+    paid_at: fullyPaid ? new Date().toISOString() : null
+  };
+  const { error } = await sb.from('invoices').update(patch).eq('id', id);
+  if(error){ toast(error.message, true); return; }
+  await logActivity(state.company.id, fullyPaid?'invoice_paid':'invoice_part_paid', 'invoice', id, {payNow, ref});
+  closeModal();
+  toast(fullyPaid ? 'Invoice fully paid' : `Part payment recorded · balance ${fmtMoney(total-newPaid)} held`);
+  renderCompanyApp('invoices');
 }
 
 // ---- GSTR-2B status modal ----
@@ -2213,14 +2278,23 @@ async function uploadVendorDoc(kind){
   const file = document.getElementById(cfg.input).files[0];
   if(!file){ msg.textContent = 'Choose a file first.'; return; }
   if(file.size > 50*1024*1024){ msg.textContent = 'File exceeds 50 MB.'; return; }
-  const path = `${state.profile.id}/${kind}_${Date.now()}_${file.name}`;
-  const { error: upErr } = await sb.storage.from('vendor-docs').upload(path, file, { upsert:true });
-  if(upErr){ msg.textContent = 'Upload failed: '+upErr.message; return; }
+  msg.style.color = 'var(--ink-soft)';
+  msg.textContent = 'Uploading…';
+  // Sanitise filename — Supabase storage rejects spaces and special chars.
+  const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+  const ext = safeName.includes('.') ? safeName.split('.').pop() : 'dat';
+  const path = `${state.profile.id}/${kind}_${Date.now()}.${ext}`;
+  const { error: upErr } = await sb.storage.from('vendor-docs').upload(path, file, { upsert:true, contentType: file.type || 'application/octet-stream' });
+  if(upErr){
+    msg.style.color = 'var(--red)';
+    msg.textContent = 'Upload failed: ' + upErr.message + '. If this mentions a bucket or permission, the vendor-docs storage setup may be missing — see migration_vendor_kyc.sql.';
+    return;
+  }
   const { error: dbErr } = await sb.from('vendors').update({ [cfg.col]: path }).eq('id', state.profile.id);
-  if(dbErr){ msg.textContent = 'Saved file but couldn\'t record it: '+dbErr.message; return; }
+  if(dbErr){ msg.style.color='var(--red)'; msg.textContent = 'File uploaded but couldn\'t record it: '+dbErr.message; return; }
   state.profile[cfg.col] = path;
   msg.style.color = 'var(--green)';
-  msg.textContent = cfg.label.charAt(0).toUpperCase()+cfg.label.slice(1)+' uploaded.';
+  msg.textContent = cfg.label.charAt(0).toUpperCase()+cfg.label.slice(1)+' uploaded successfully.';
   loadVendorDocLinks();
 }
 async function loadVendorDocLinks(){
@@ -2241,6 +2315,7 @@ async function loadVendorDocLinks(){
 
 async function renderVendorApp(tab){
   state.activeTab = tab || state.activeTab || 'pos';
+  try { history.replaceState(null, '', '#' + state.activeTab); } catch(e){}
   const vid = state.profile.id;
   const notActive = state.profile.status !== 'active';
 
