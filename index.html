@@ -8,87 +8,96 @@
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <style>
   /* ============================================================
-     Kiyra — "Modern Ledger" design system
-     Deep ink navy + accountant's green, tabular numerals,
-     disciplined hairline structure. Built for finance/procurement
-     users who value precision and trust over flash.
+     Kiyra — modern SaaS dashboard
+     Vibrant indigo/violet, clean white cards, soft shadows,
+     rounded corners, light polish. Zoho/Freshworks family.
      ============================================================ */
-  @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&display=swap');
+  @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&family=Inter:wght@400;500;600;700&display=swap');
   :root{
-    --bg:#f0f1ec;            /* warm paper-grey, like ledger stock */
+    --bg:#f6f7fb;            /* cool light grey */
     --card:#ffffff;
-    --border:#e0e2da;
-    --border-strong:#c9ccc0;
-    --ink:#16202e;           /* deep ink navy — primary text & chrome */
-    --ink-soft:#5a6472;
-    --text:#16202e;
-    --muted:#6b7280;
-    --primary:#0f6f5c;       /* accountant's green (ledger credit) */
-    --primary-dark:#0c5a4a;
-    --primary-soft:#e4f0ec;
-    --green:#0f6f5c;
-    --red:#b23b3b;
-    --amber:#b8893a;         /* muted brass */
-    --blue:#3b5b9b;
-    --radius:12px;
-    --shadow:0 1px 2px rgba(22,32,46,0.04), 0 8px 24px -16px rgba(22,32,46,0.18);
+    --border:#e7e9f2;
+    --border-strong:#d5d8e6;
+    --ink:#1a1d2e;           /* near-navy text */
+    --ink-soft:#6b7186;
+    --text:#1a1d2e;
+    --muted:#8990a5;
+    --primary:#5b5bd6;       /* vibrant indigo */
+    --primary-dark:#4a48c4;
+    --primary-soft:#eeeefb;
+    --primary-grad:linear-gradient(135deg,#6366f1 0%,#8b5cf6 100%);
+    --green:#16a34a;
+    --green-soft:#e7f6ee;
+    --red:#e11d48;
+    --red-soft:#fdeaf0;
+    --amber:#f59e0b;
+    --amber-soft:#fdf3e2;
+    --blue:#2563eb;
+    --blue-soft:#e8f0fe;
+    --radius:14px;
+    --radius-sm:10px;
+    --shadow:0 1px 2px rgba(20,23,45,0.04), 0 4px 16px -8px rgba(20,23,45,0.10);
+    --shadow-md:0 4px 24px -8px rgba(20,23,45,0.16);
+    --shadow-lg:0 12px 40px -12px rgba(20,23,45,0.22);
     --num:'Inter';
   }
   *{box-sizing:border-box;}
-  body{margin:0;font-family:'Inter',-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--text);-webkit-font-smoothing:antialiased;font-feature-settings:'tnum' 1,'cv05' 1;}
+  body{margin:0;font-family:'Inter',-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--text);-webkit-font-smoothing:antialiased;font-feature-settings:'tnum' 1;}
   .app{max-width:1220px;margin:0 auto;padding:26px 24px 60px;}
 
   /* top chrome */
-  header.topbar{display:flex;justify-content:space-between;align-items:center;padding:0 26px;height:60px;background:var(--ink);color:#fff;position:sticky;top:0;z-index:30;}
-  header.topbar h1{font-family:'Fraunces',serif;font-size:19px;font-weight:600;margin:0;letter-spacing:-0.01em;color:#fff;}
-  header.topbar h1 .mark{color:#5cc9a7;}
-  header.topbar .who{font-size:12.5px;color:#aeb8c4;letter-spacing:0.01em;}
-  header.topbar .btn{background:rgba(255,255,255,0.08);color:#fff;border:1px solid rgba(255,255,255,0.16);}
-  header.topbar .btn:hover{background:rgba(255,255,255,0.16);}
+  header.topbar{display:flex;justify-content:space-between;align-items:center;padding:0 24px;height:62px;background:#fff;color:var(--ink);position:sticky;top:0;z-index:30;border-bottom:1px solid var(--border);box-shadow:0 1px 3px rgba(20,23,45,0.03);}
+  header.topbar h1{font-family:'Plus Jakarta Sans',sans-serif;font-size:20px;font-weight:800;margin:0;letter-spacing:-0.02em;color:var(--ink);}
+  header.topbar h1 .mark{color:var(--primary);}
+  header.topbar .who{font-size:12.5px;color:var(--ink-soft);letter-spacing:0.01em;}
+  header.topbar .btn{background:var(--card);color:var(--ink);border:1px solid var(--border-strong);}
+  header.topbar .btn:hover{background:var(--bg);border-color:var(--primary);color:var(--primary);}
 
   /* buttons */
-  .btn{padding:9px 15px;border-radius:9px;border:1px solid var(--border-strong);background:var(--card);cursor:pointer;font-size:13.5px;font-weight:500;font-family:inherit;color:var(--ink);transition:all .14s ease;line-height:1.1;}
-  .btn:hover{border-color:var(--ink-soft);background:#fafbf9;}
-  .btn-primary{background:var(--primary);color:#fff;border:1px solid var(--primary);}
-  .btn-primary:hover{background:var(--primary-dark);border-color:var(--primary-dark);}
-  .btn-danger{background:#fff;color:var(--red);border:1px solid #e4c4c4;}
-  .btn-danger:hover{background:#fbf1f1;border-color:var(--red);}
-  .btn-green{background:var(--primary);color:#fff;border:1px solid var(--primary);}
-  .btn-green:hover{background:var(--primary-dark);}
-  .btn-sm{padding:5px 11px;font-size:12px;border-radius:7px;}
+  .btn{padding:9px 16px;border-radius:10px;border:1px solid var(--border-strong);background:var(--card);cursor:pointer;font-size:13.5px;font-weight:600;font-family:inherit;color:var(--ink);transition:all .15s ease;line-height:1.1;}
+  .btn:hover{border-color:var(--primary);color:var(--primary);background:var(--primary-soft);}
+  .btn-primary{background:var(--primary);color:#fff !important;border:1px solid var(--primary);box-shadow:0 2px 8px -2px rgba(91,91,214,0.5);}
+  .btn-primary:hover{background:var(--primary-dark);border-color:var(--primary-dark);color:#fff !important;transform:translateY(-1px);box-shadow:0 4px 14px -3px rgba(91,91,214,0.55);}
+  .btn-danger{background:#fff;color:var(--red);border:1px solid #f3c6d2;}
+  .btn-danger:hover{background:var(--red-soft);border-color:var(--red);color:var(--red);}
+  .btn-green{background:var(--green);color:#fff !important;border:1px solid var(--green);box-shadow:0 2px 8px -2px rgba(22,163,74,0.45);}
+  .btn-green:hover{background:#12833c;color:#fff !important;transform:translateY(-1px);}
+  .btn-sm{padding:6px 12px;font-size:12px;border-radius:8px;font-weight:600;box-shadow:none;}
 
   /* cards */
   .card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:22px;margin-bottom:18px;box-shadow:var(--shadow);}
-  .card h3{font-family:'Fraunces',serif;font-weight:600;font-size:17px;letter-spacing:-0.01em;}
+  .card h3{font-family:'Plus Jakarta Sans',sans-serif;font-weight:700;font-size:17px;letter-spacing:-0.01em;}
   .grid{display:grid;gap:18px;}
   .grid-2{grid-template-columns:1fr 1fr;}
   .grid-3{grid-template-columns:repeat(3,1fr);}
   .grid-4{grid-template-columns:repeat(4,1fr);}
 
   /* forms */
-  input,select,textarea{width:100%;padding:10px 11px;border:1px solid var(--border-strong);border-radius:8px;font-size:14px;margin-top:5px;background:#fff;font-family:inherit;color:var(--ink);transition:border-color .14s,box-shadow .14s;}
+  input,select,textarea{width:100%;padding:10px 12px;border:1px solid var(--border-strong);border-radius:10px;font-size:14px;margin-top:5px;background:#fff;font-family:inherit;color:var(--ink);transition:border-color .15s,box-shadow .15s;}
   input:focus,select:focus,textarea:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 3px var(--primary-soft);}
   label{font-size:11px;color:var(--ink-soft);font-weight:600;text-transform:uppercase;letter-spacing:.05em;}
 
   /* tables */
   table{width:100%;border-collapse:collapse;font-size:13.5px;}
-  th,td{text-align:left;padding:11px 10px;border-bottom:1px solid var(--border);}
-  th{color:var(--ink-soft);font-size:11px;text-transform:uppercase;letter-spacing:.05em;font-weight:600;}
+  th,td{text-align:left;padding:12px 12px;border-bottom:1px solid var(--border);}
+  th{color:var(--ink-soft);font-size:11px;text-transform:uppercase;letter-spacing:.05em;font-weight:700;background:var(--bg);}
+  th:first-child{border-top-left-radius:8px;}
+  th:last-child{border-top-right-radius:8px;}
   tbody tr{transition:background .12s;}
-  tbody tr:hover{background:#fafbf8;}
+  tbody tr:hover{background:var(--primary-soft);}
 
   /* badges */
-  .badge{padding:3px 10px;border-radius:6px;font-size:10.5px;font-weight:600;display:inline-block;letter-spacing:.03em;text-transform:uppercase;border:1px solid transparent;}
-  .badge-draft{background:#eceee9;color:#5a6472;}
-  .badge-sent{background:#e8eef8;color:#3b5b9b;}
-  .badge-pending_approval{background:#f7efe0;color:#8a6420;}
-  .badge-acknowledged{background:#e8eef8;color:#3b5b9b;}
-  .badge-closed{background:#eceee9;color:#5a6472;}
-  .badge-cancelled{background:#f8eded;color:#a33;}
-  .badge-submitted{background:#f7efe0;color:#8a6420;}
-  .badge-under_review{background:#f7efe0;color:#8a6420;}
-  .badge-approved{background:#e2efea;color:#0f6f5c;}
-  .badge-rejected{background:#f8eded;color:#a33;}
+  .badge{padding:3px 11px;border-radius:99px;font-size:10.5px;font-weight:700;display:inline-block;letter-spacing:.03em;text-transform:uppercase;border:1px solid transparent;}
+  .badge-draft{background:#eef0f6;color:#6b7186;}
+  .badge-sent{background:var(--blue-soft);color:var(--blue);}
+  .badge-pending_approval{background:var(--amber-soft);color:#b26f04;}
+  .badge-acknowledged{background:var(--blue-soft);color:var(--blue);}
+  .badge-closed{background:#eef0f6;color:#6b7186;}
+  .badge-cancelled{background:var(--red-soft);color:var(--red);}
+  .badge-submitted{background:var(--amber-soft);color:#b26f04;}
+  .badge-under_review{background:var(--amber-soft);color:#b26f04;}
+  .badge-approved{background:var(--green-soft);color:var(--green);}
+  .badge-rejected{background:var(--red-soft);color:var(--red);}
   .badge-paid{background:#e8eef8;color:#2f4a80;}
   .badge-active{background:#e2efea;color:#0f6f5c;}
   .badge-pending{background:#f7efe0;color:#8a6420;}
@@ -97,11 +106,11 @@
   /* tabs */
   /* ---- Sidebar layout ---- */
   .layout{display:flex;min-height:calc(100vh - 60px);}
-  .sidebar{width:210px;flex-shrink:0;background:#fff;border-right:1px solid var(--border);padding:16px 12px;position:sticky;top:60px;height:calc(100vh - 60px);overflow-y:auto;}
-  .sidebar .navlink{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;cursor:pointer;font-size:14px;font-weight:500;color:var(--ink-soft);margin-bottom:2px;transition:background .12s,color .12s;}
-  .sidebar .navlink:hover{background:#f2f4ef;color:var(--ink);}
-  .sidebar .navlink.active{background:var(--primary);color:#fff;font-weight:600;}
-  .sidebar .navlink.active:hover{background:var(--primary-dark);color:#fff;}
+  .sidebar{width:216px;flex-shrink:0;background:#fff;border-right:1px solid var(--border);padding:16px 12px;position:sticky;top:62px;height:calc(100vh - 62px);overflow-y:auto;}
+  .sidebar .navlink{display:flex;align-items:center;gap:10px;padding:11px 14px;border-radius:10px;cursor:pointer;font-size:14px;font-weight:600;color:var(--ink-soft);margin-bottom:3px;transition:all .14s;}
+  .sidebar .navlink:hover{background:var(--primary-soft);color:var(--primary);}
+  .sidebar .navlink.active{background:var(--primary-grad);color:#fff;box-shadow:0 4px 12px -3px rgba(91,91,214,0.5);}
+  .sidebar .navlink.active:hover{color:#fff;}
   .main-content{flex:1;min-width:0;max-width:1220px;margin:0 auto;padding:26px 24px 60px;width:100%;}
   .hamburger{display:none;background:rgba(255,255,255,0.08);color:#fff;border:1px solid rgba(255,255,255,0.16);border-radius:7px;width:38px;height:34px;font-size:18px;cursor:pointer;align-items:center;justify-content:center;}
   .sidebar-backdrop{display:none;position:fixed;inset:60px 0 0 0;background:rgba(0,0,0,0.35);z-index:39;}
@@ -117,29 +126,31 @@
   .tabs{display:none;} /* legacy horizontal tabs hidden; sidebar used instead */
 
   /* login */
-  .login-wrap{display:flex;align-items:center;justify-content:center;min-height:100vh;background:linear-gradient(160deg,#16202e 0%,#1d3040 55%,#12433a 100%);padding:20px;}
-  .login-card{width:390px;box-shadow:0 24px 60px -20px rgba(0,0,0,0.5);}
-  .login-card h2{font-family:'Fraunces',serif;font-weight:700;font-size:26px;letter-spacing:-0.02em;}
+  .login-wrap{display:flex;align-items:center;justify-content:center;min-height:100vh;background:linear-gradient(150deg,#6366f1 0%,#8b5cf6 50%,#a855f7 100%);padding:20px;}
+  .login-card{width:390px;box-shadow:0 24px 60px -20px rgba(30,20,80,0.5);}
+  .login-card h2{font-family:'Plus Jakarta Sans',sans-serif;font-weight:800;font-size:26px;letter-spacing:-0.02em;}
   .brand-lockup{display:flex;align-items:baseline;gap:2px;}
 
   /* stats / KPI */
   .row-actions{display:flex;gap:6px;flex-wrap:wrap;}
   .muted{color:var(--muted);font-size:13px;}
-  .stat{font-size:30px;font-weight:700;letter-spacing:-0.02em;font-variant-numeric:tabular-nums;font-family:'Fraunces',serif;color:var(--ink);line-height:1.1;}
-  .kpi{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:18px 20px;box-shadow:var(--shadow);position:relative;overflow:hidden;}
-  .kpi .kpi-label{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-soft);font-weight:600;margin-bottom:8px;}
-  .kpi .kpi-value{font-size:28px;font-weight:700;font-family:'Fraunces',serif;letter-spacing:-0.02em;color:var(--ink);font-variant-numeric:tabular-nums;line-height:1;}
-  .kpi .kpi-sub{font-size:12px;color:var(--ink-soft);margin-top:6px;}
-  .kpi .kpi-accent{position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--primary);}
-  .kpi.amber .kpi-accent{background:var(--amber);}
-  .kpi.blue .kpi-accent{background:var(--blue);}
-  .kpi.red .kpi-accent{background:var(--red);}
+  .stat{font-size:30px;font-weight:700;letter-spacing:-0.02em;font-variant-numeric:tabular-nums;font-family:'Plus Jakarta Sans',sans-serif;color:var(--ink);line-height:1.1;}
+  .kpi{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:20px;box-shadow:var(--shadow);position:relative;overflow:hidden;transition:transform .15s,box-shadow .15s;}
+  .kpi:hover{transform:translateY(-2px);box-shadow:var(--shadow-md);}
+  .kpi .kpi-label{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-soft);font-weight:700;margin-bottom:10px;}
+  .kpi .kpi-value{font-size:28px;font-weight:800;font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.02em;color:var(--ink);font-variant-numeric:tabular-nums;line-height:1;}
+  .kpi .kpi-sub{font-size:12px;color:var(--ink-soft);margin-top:8px;}
+  .kpi .kpi-accent{position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--primary-grad);}
+  .kpi.amber .kpi-accent{background:linear-gradient(180deg,#fbbf24,#f59e0b);}
+  .kpi.blue .kpi-accent{background:linear-gradient(180deg,#3b82f6,#2563eb);}
+  .kpi.red .kpi-accent{background:linear-gradient(180deg,#fb7185,#e11d48);}
+  .kpi.green .kpi-accent{background:linear-gradient(180deg,#34d399,#16a34a);}
 
   /* modal */
   .modal-bg{position:fixed;inset:0;background:rgba(16,24,34,0.55);backdrop-filter:blur(2px);display:flex;align-items:center;justify-content:center;z-index:50;padding:20px;}
   .modal{background:#fff;border-radius:14px;padding:26px;width:460px;max-width:94vw;max-height:88vh;overflow:auto;box-shadow:0 30px 80px -20px rgba(0,0,0,0.5);}
   .modal.wide{width:880px;}
-  .modal h3{font-family:'Fraunces',serif;font-weight:600;font-size:20px;letter-spacing:-0.01em;margin-top:0;}
+  .modal h3{font-family:'Plus Jakarta Sans',sans-serif;font-weight:700;font-size:20px;letter-spacing:-0.01em;margin-top:0;}
   .close-x{float:right;cursor:pointer;color:var(--ink-soft);font-size:16px;line-height:1;}
   .close-x:hover{color:var(--ink);}
 
@@ -163,7 +174,7 @@
   .legend-dot{width:11px;height:11px;border-radius:3px;flex-shrink:0;}
 
   /* section eyebrow */
-  .eyebrow{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--primary);font-weight:600;margin-bottom:4px;}
+  .eyebrow{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--primary);font-weight:700;margin-bottom:4px;}
 
   .hidden{display:none;}
   a{color:var(--primary);text-decoration:none;}
@@ -171,7 +182,7 @@
   code{background:#eceee9;padding:2px 7px;border-radius:5px;font-size:13px;font-family:'Inter';}
 
   /* ---- Universal filter bar ---- */
-  .filterbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:14px 0 4px;padding:12px 14px;background:#f6f7f3;border:1px solid var(--border);border-radius:10px;}
+  .filterbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:14px 0 4px;padding:14px 16px;background:var(--bg);border:1px solid var(--border);border-radius:12px;}
   .filterbar .fb-search{flex:1;min-width:180px;}
   .filterbar input,.filterbar select{margin-top:0;padding:8px 10px;font-size:13px;background:#fff;}
   .filterbar .fb-group{display:flex;flex-direction:column;gap:2px;}
@@ -182,9 +193,9 @@
   tr.fb-hidden{display:none;}
 
   /* ITC / 2B badges */
-  .badge-reflected{background:#e2efea;color:#0f6f5c;}
-  .badge-not_reflected{background:#f8eded;color:#b23b3b;}
-  .badge-pending2b{background:#f7efe0;color:#8a6420;}
+  .badge-reflected{background:var(--green-soft);color:var(--green);}
+  .badge-not_reflected{background:var(--red-soft);color:var(--red);}
+  .badge-pending2b{background:var(--amber-soft);color:#b26f04;}
 
   @media(max-width:820px){
     .grid-3,.grid-4{grid-template-columns:1fr 1fr;}
@@ -520,6 +531,32 @@ async function signOut(){
   renderLogin();
 }
 
+// ---- Change password (works for superadmin, company users, and vendors) ----
+function openChangePassword(){
+  showModal(`
+    <span class="close-x" onclick="closeModal()">✕</span>
+    <h3>Change password</h3>
+    <p class="muted" style="font-size:13px;">Enter a new password for your account. You'll stay signed in.</p>
+    <label>New password</label>
+    <input id="cp-new" type="password" autocomplete="new-password"/>
+    <label style="display:block;margin-top:8px;">Confirm new password</label>
+    <input id="cp-confirm" type="password" autocomplete="new-password"/>
+    <button class="btn btn-primary" style="width:100%;margin-top:14px;" onclick="submitChangePassword()">Update password</button>
+    <p class="muted" id="cp-msg" style="font-size:12px;"></p>
+  `);
+}
+async function submitChangePassword(){
+  const p1 = document.getElementById('cp-new').value;
+  const p2 = document.getElementById('cp-confirm').value;
+  const msg = document.getElementById('cp-msg');
+  msg.style.color = 'var(--red)';
+  if(!p1 || p1.length < 6){ msg.textContent = 'Password must be at least 6 characters.'; return; }
+  if(p1 !== p2){ msg.textContent = 'Passwords do not match.'; return; }
+  const { error } = await sb.auth.updateUser({ password: p1 });
+  if(error){ msg.textContent = error.message; return; }
+  closeModal(); toast('Password updated');
+}
+
 // ============================================================
 // LOGIN VIEW
 // ============================================================
@@ -687,6 +724,7 @@ function shell(title, roleLabel, bodyHtml, tabs, renderFn){
     </div>
     <div style="display:flex;align-items:center;gap:14px;">
       <span class="who">${roleLabel}</span>
+      <button class="btn btn-sm" onclick="openChangePassword()">Change password</button>
       <button class="btn btn-sm" onclick="signOut()">Sign out</button>
     </div>
   </header>
@@ -973,7 +1011,7 @@ async function renderCompanyApp(tab){
       <div style="display:flex;gap:20px;align-items:center;">
         <div style="width:120px;height:120px;border-radius:50%;background:conic-gradient(${segments});flex-shrink:0;position:relative;">
           <div style="position:absolute;inset:22px;background:#fff;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-direction:column;">
-            <span style="font-family:'Fraunces',serif;font-weight:700;font-size:22px;">${invList.length}</span>
+            <span style="font-family:'Plus Jakarta Sans',sans-serif;font-weight:700;font-size:22px;">${invList.length}</span>
             <span style="font-size:10px;color:var(--ink-soft);text-transform:uppercase;letter-spacing:.05em;">Invoices</span>
           </div>
         </div>
@@ -3074,13 +3112,23 @@ async function renderVendorApp(tab){
       </table>
     </div>`;
   } else {
-    const { data: invs } = await sb.from('invoices').select('*, purchase_orders(po_number)').eq('vendor_id',vid).order('submitted_at',{ascending:false});
+    // Fetch invoices WITHOUT the PO join first (a failed join shouldn't hide invoices),
+    // then fetch PO numbers separately and map them in.
+    const { data: invs, error: invErr } = await sb.from('invoices').select('*').eq('vendor_id',vid).order('submitted_at',{ascending:false});
+    // map PO numbers
+    let poMap = {};
+    const poIds = [...new Set((invs||[]).map(i=>i.po_id).filter(Boolean))];
+    if(poIds.length){
+      const { data: pos } = await sb.from('purchase_orders').select('id,po_number').in('id', poIds);
+      (pos||[]).forEach(p=>{ poMap[p.id] = p.po_number; });
+    }
     const totalHeld = (invs||[]).reduce((s,i)=>s+totalHold(i),0);
     const heldBanner = totalHeld > 0
       ? `<div style="background:#f7efe0;border:1px solid #e8d5b0;border-radius:10px;padding:12px 14px;margin-bottom:12px;font-size:13.5px;color:#8a6420;">
           <strong>${fmtMoney(totalHeld)} currently on hold</strong> across your invoices. See the "Held" column for the amount and reason on each. GST amounts are typically released once your invoice reflects in the buyer's GSTR-2B (i.e. after you file your GSTR-1).
         </div>` : '';
     body += `<div class="card"><h3 style="margin-top:0;">My submitted invoices</h3>
+      ${invErr ? `<p style="color:var(--red);">Couldn't load invoices: ${invErr.message}</p>` : ''}
       ${heldBanner}
       <table><tr><th>Invoice #</th><th>PO</th><th>Amount</th><th>Paid</th><th>Held</th><th>Status</th><th>Submitted</th></tr>
       ${(invs||[]).map(i=>{
@@ -3091,7 +3139,7 @@ async function renderVendorApp(tab){
         if(gstHold>0) heldParts.push(`${fmtMoney(gstHold)} <span class="muted">(GST — awaiting GSTR-2B)</span>`);
         if(mHold>0) heldParts.push(`${fmtMoney(mHold)} <span class="muted">(${i.manual_hold_reason||'on hold'})</span>`);
         return `<tr>
-        <td>${i.invoice_number}</td><td>${i.purchase_orders?.po_number||''}</td><td>${fmtMoney(i.total_amount)}</td>
+        <td>${i.invoice_number}</td><td>${poMap[i.po_id]||'—'}</td><td>${fmtMoney(i.total_amount)}</td>
         <td>${paid>0?fmtMoney(paid):'—'}</td>
         <td>${heldParts.length?heldParts.join('<br>'):'—'}</td>
         <td>${badge(i.status)}${i.status==='rejected'&&i.rejection_reason?`<div class="muted">${i.rejection_reason}</div>`:''}</td>
