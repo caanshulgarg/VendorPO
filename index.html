@@ -885,7 +885,20 @@ async function renderCompanyApp(tab){
   let tabs = [['dashboard','Dashboard'],['pos','Purchase Orders'],['invoices','Invoices / Approvals'],['payables','Payables'],['payments','Payments'],['reports','Reports'],['vendors','Vendors']];
   if(isAdmin) tabs.push(['users','Team']);
   if(isAdmin) tabs.push(['settings','Settings']);
+  // Non-admins with a restricted tab set only see their allowed tabs.
+  // allowed_tabs is null/undefined for full access; an array restricts.
+  const allowed = state.profile.allowed_tabs;
+  if(!isAdmin && Array.isArray(allowed) && allowed.length){
+    tabs = tabs.filter(([k])=>allowed.includes(k));
+    // Safety: if their current tab isn't allowed, snap to the first allowed one.
+    if(!allowed.includes(state.activeTab) && tabs.length){ state.activeTab = tabs[0][0]; }
+  }
   state.__companyTabs = tabs;
+
+  // Guard: block rendering a tab the user isn't allowed to see (defense in depth).
+  if(!isAdmin && Array.isArray(allowed) && allowed.length && !allowed.includes(state.activeTab)){
+    state.activeTab = tabs.length ? tabs[0][0] : 'dashboard';
+  }
 
   let body = '';
 
@@ -1219,20 +1232,31 @@ async function renderCompanyApp(tab){
       ['aging','Aging report (0-30-60-90)'],
       ['gstcompliance','Vendor GST compliance']
     ];
+    // load saved custom reports for this company
+    const { data: customReps } = await sb.from('custom_reports').select('*').eq('company_id',cid).order('created_at',{ascending:false});
+    window.__customReports = customReps || [];
+    const customOpts = (customReps||[]).map(c=>[`custom:${c.id}`, `★ ${c.name}`]);
     body += `<div class="card">
-      <h3 style="margin-top:0;">Reports</h3>
-      <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+        <h3 style="margin:0;">Reports</h3>
+        <button class="btn btn-primary btn-sm" onclick="openCustomReportBuilder()">+ Custom report</button>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;margin-top:10px;">
         <div class="fb-group" style="min-width:260px;">
           <span class="fb-label">Report</span>
           <select id="rep-type" onchange="onReportChange()">
+            <optgroup label="Standard reports">
             ${reportOptions.map(([v,l])=>`<option value="${v}" ${rep===v?'selected':''}>${l}</option>`).join('')}
+            </optgroup>
+            ${customOpts.length?`<optgroup label="My custom reports">${customOpts.map(([v,l])=>`<option value="${v}" ${rep===v?'selected':''}>${l}</option>`).join('')}</optgroup>`:''}
           </select>
         </div>
         <div class="fb-group"><span class="fb-label">From</span><input type="date" id="rep-from" value="${from}"/></div>
         <div class="fb-group"><span class="fb-label">To</span><input type="date" id="rep-to" value="${to}"/></div>
         <button class="btn btn-primary" onclick="runReport()">Run report</button>
+        <button class="btn btn-sm" id="rep-delete-btn" style="display:none;" onclick="deleteCurrentCustomReport()">Delete this custom report</button>
       </div>
-      <p class="muted" style="margin-top:8px;font-size:12px;">Leave dates blank to include everything. Date range applies to the document/transaction date of each report.</p>
+      <p class="muted" style="margin-top:8px;font-size:12px;">Leave dates blank to include everything. Build your own with "+ Custom report".</p>
     </div>
     <div id="report-output"></div>`;
     // auto-run current report after render
@@ -1271,13 +1295,25 @@ async function renderCompanyApp(tab){
 
   else if(state.activeTab === 'users' && isAdmin){
     const { data: users } = await sb.from('company_users').select('*').eq('company_id',cid);
+    const tabAccessLabel = (u)=>{
+      if(u.role==='company_admin') return '<span class="muted">All (admin)</span>';
+      const a = u.allowed_tabs;
+      if(!Array.isArray(a) || !a.length) return '<span class="muted">All tabs</span>';
+      return a.map(k=>({dashboard:'Dashboard',pos:'POs',invoices:'Invoices',payables:'Payables',payments:'Payments',reports:'Reports',vendors:'Vendors'})[k]||k).join(', ');
+    };
     body += `<div class="card">
       <div style="display:flex;justify-content:space-between;align-items:center;">
         <h3 style="margin:0;">Team</h3>
         <button class="btn btn-primary" onclick="openNewUserModal()">+ Add team member</button>
       </div>
-      <table><tr><th>Name</th><th>Email</th><th>Role</th><th>Approval level</th><th>Status</th></tr>
-      ${(users||[]).map(u=>`<tr><td>${u.name||''}</td><td>${u.email}</td><td>${u.role}</td><td>${u.approval_level||'-'}</td><td>${badge(u.status)}</td></tr>`).join('')}
+      <p class="muted" style="margin:6px 0;">Give each member access to only the tabs they need. Admins always see everything.</p>
+      <table><tr><th>Name</th><th>Email</th><th>Role</th><th>Tab access</th><th>Status</th><th></th></tr>
+      ${(users||[]).map(u=>`<tr>
+        <td>${u.name||''}</td><td>${u.email}</td><td>${u.role}</td>
+        <td style="font-size:12.5px;">${tabAccessLabel(u)}</td>
+        <td>${badge(u.status)}</td>
+        <td class="row-actions">${u.role!=='company_admin'?`<button class="btn btn-sm" onclick='openRoleModal(${JSON.stringify(u.id)})'>Set access</button>`:''}</td>
+      </tr>`).join('')}
       </table>
     </div>`;
   }
@@ -1732,6 +1768,11 @@ async function runReport(){
   state.reportTo = (document.getElementById('rep-to')||{}).value || '';
   const out = document.getElementById('report-output');
   if(out) out.innerHTML = '<div class="card"><p class="muted">Running report…</p></div>';
+  // toggle the delete button visibility for custom reports
+  const delBtn = document.getElementById('rep-delete-btn');
+  if(delBtn) delBtn.style.display = type.startsWith('custom:') ? 'inline-block' : 'none';
+  // custom report dispatch
+  if(type.startsWith('custom:')){ await runCustomReport(type.split(':')[1]); return; }
   const cid = state.company.id;
   let headers = [], rows = [], summary = '', moneyCols = [];
   const from = state.reportFrom, to = state.reportTo;
@@ -1846,6 +1887,143 @@ function exportReport(fmt){
     const disp = d.rows.map(r=>r.map((c,idx)=>(d.moneyCols||[]).includes(idx)?fmtMoney(c):c));
     exportRowsPDF(d.title, d.headers, disp);
   }
+}
+
+// ============================================================
+// CUSTOM REPORT BUILDER
+// Sources and the columns available for each. Each column has a
+// key, a label, whether it's money, and a getter(row) function.
+// ============================================================
+const REPORT_SOURCES = {
+  invoices: {
+    label: 'Invoices',
+    query: (cid)=>sb.from('invoices').select('*, vendors(name), purchase_orders(po_number)').eq('company_id',cid),
+    dateField: 'submitted_at',
+    columns: [
+      {key:'invoice_number', label:'Invoice #', get:r=>r.invoice_number},
+      {key:'vendor', label:'Vendor', get:r=>r.vendors?.name||''},
+      {key:'po', label:'PO #', get:r=>r.purchase_orders?.po_number||''},
+      {key:'total_amount', label:'Total', money:true, get:r=>Number(r.total_amount||0)},
+      {key:'gst_amount', label:'GST', money:true, get:r=>Number(r.gst_amount||0)},
+      {key:'amount_paid', label:'Paid', money:true, get:r=>amountPaidEff(r)},
+      {key:'held', label:'Held', money:true, get:r=>r.status==='paid'?0:totalHold(r)},
+      {key:'due', label:'Due', money:true, get:r=>amountDue(r)},
+      {key:'gstr2b_status', label:'GSTR-2B', get:r=>r.gstr2b_status||'pending'},
+      {key:'status', label:'Status', get:r=>r.status},
+      {key:'submitted_at', label:'Submitted', get:r=>fmtDate(r.submitted_at)}
+    ]
+  },
+  pos: {
+    label: 'Purchase Orders',
+    query: (cid)=>sb.from('purchase_orders').select('*, vendors(name)').eq('company_id',cid),
+    dateField: 'created_at',
+    columns: [
+      {key:'po_number', label:'PO #', get:r=>r.po_number},
+      {key:'vendor', label:'Vendor', get:r=>r.vendors?.name||''},
+      {key:'total_amount', label:'Amount', money:true, get:r=>Number(r.total_amount||0)},
+      {key:'status', label:'Status', get:r=>r.status},
+      {key:'created_at', label:'Created', get:r=>fmtDate(r.created_at)}
+    ]
+  },
+  payments: {
+    label: 'Payments',
+    query: (cid)=>sb.from('payments').select('*, invoices(invoice_number), vendors(name)').eq('company_id',cid),
+    dateField: 'paid_on',
+    columns: [
+      {key:'paid_on', label:'Date', get:r=>fmtDate(r.paid_on)},
+      {key:'vendor', label:'Vendor', get:r=>r.vendors?.name||''},
+      {key:'invoice', label:'Invoice #', get:r=>r.invoices?.invoice_number||''},
+      {key:'amount', label:'Amount', money:true, get:r=>Number(r.amount||0)},
+      {key:'reference', label:'Reference', get:r=>r.reference||''}
+    ]
+  }
+};
+
+function openCustomReportBuilder(){
+  const src = 'invoices';
+  showModal(`
+    <span class="close-x" onclick="closeModal()">✕</span>
+    <h3>Build a custom report</h3>
+    <label>Report name</label>
+    <input id="cr-name" placeholder="e.g. High-value unpaid invoices"/>
+    <label style="display:block;margin-top:10px;">Data source</label>
+    <select id="cr-source" onchange="renderCustomColumns()">
+      ${Object.entries(REPORT_SOURCES).map(([k,v])=>`<option value="${k}">${v.label}</option>`).join('')}
+    </select>
+    <label style="display:block;margin-top:10px;">Columns to include</label>
+    <div id="cr-columns" style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:4px;"></div>
+    <label style="display:block;margin-top:12px;">Filters (optional)</label>
+    <div style="display:flex;flex-wrap:wrap;gap:8px;">
+      <div class="fb-group"><span class="fb-label">Status</span><input id="cr-f-status" placeholder="e.g. approved"/></div>
+      <div class="fb-group"><span class="fb-label">Vendor contains</span><input id="cr-f-vendor" placeholder="name"/></div>
+      <div class="fb-group"><span class="fb-label">Min ₹</span><input id="cr-f-amtmin" type="number" style="width:90px;"/></div>
+      <div class="fb-group"><span class="fb-label">Max ₹</span><input id="cr-f-amtmax" type="number" style="width:90px;"/></div>
+    </div>
+    <button class="btn btn-primary" style="width:100%;margin-top:14px;" onclick="saveCustomReport()">Save report</button>
+    <p class="muted" id="cr-msg" style="font-size:12px;"></p>
+  `);
+  renderCustomColumns();
+}
+function renderCustomColumns(){
+  const src = document.getElementById('cr-source').value;
+  const cols = REPORT_SOURCES[src].columns;
+  document.getElementById('cr-columns').innerHTML = cols.map(c=>`
+    <label style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:400;text-transform:none;letter-spacing:0;">
+      <input type="checkbox" class="cr-col" value="${c.key}" checked style="width:auto;margin:0;"/> ${c.label}
+    </label>`).join('');
+}
+async function saveCustomReport(){
+  const name = document.getElementById('cr-name').value.trim();
+  const source = document.getElementById('cr-source').value;
+  const columns = Array.from(document.querySelectorAll('.cr-col:checked')).map(cb=>cb.value);
+  const msg = document.getElementById('cr-msg');
+  if(!name){ msg.textContent='Give the report a name.'; return; }
+  if(!columns.length){ msg.textContent='Pick at least one column.'; return; }
+  const filters = {
+    status: document.getElementById('cr-f-status').value.trim() || null,
+    vendor: document.getElementById('cr-f-vendor').value.trim() || null,
+    amtMin: document.getElementById('cr-f-amtmin').value || null,
+    amtMax: document.getElementById('cr-f-amtmax').value || null
+  };
+  const { error } = await sb.from('custom_reports').insert({
+    company_id: state.company.id, created_by: state.session?.user?.id || null,
+    name, source, columns, filters
+  });
+  if(error){ msg.textContent = error.message; return; }
+  closeModal(); toast('Custom report saved'); renderCompanyApp('reports');
+}
+async function runCustomReport(id){
+  const rep = (window.__customReports||[]).find(c=>c.id===id);
+  if(!rep){ return; }
+  const srcDef = REPORT_SOURCES[rep.source];
+  if(!srcDef){ return; }
+  const { data } = await srcDef.query(state.company.id);
+  const from = state.reportFrom, to = state.reportTo;
+  const f = rep.filters||{};
+  let list = (data||[]).filter(r=>inRange(r[srcDef.dateField], from, to));
+  // apply saved filters
+  if(f.status) list = list.filter(r=> (r.status||'').toLowerCase().includes(f.status.toLowerCase()));
+  if(f.vendor) list = list.filter(r=> (r.vendors?.name||'').toLowerCase().includes(f.vendor.toLowerCase()));
+  const chosen = srcDef.columns.filter(c=>rep.columns.includes(c.key));
+  const amtCol = chosen.find(c=>c.money);
+  if((f.amtMin||f.amtMax) && amtCol){
+    list = list.filter(r=>{ const v = amtCol.get(r); if(f.amtMin && v<parseFloat(f.amtMin)) return false; if(f.amtMax && v>parseFloat(f.amtMax)) return false; return true; });
+  }
+  const headers = chosen.map(c=>c.label);
+  const moneyCols = chosen.map((c,i)=>c.money?i:-1).filter(i=>i>=0);
+  const rows = list.map(r=>chosen.map(c=>{ const v=c.get(r); return c.money? Number(v).toFixed(2): v; }));
+  state.__reportData = { type:'custom_'+id, headers, rows, title: rep.name, moneyCols };
+  renderReportTable(headers, rows, `${rows.length} row(s)`, rep.name, moneyCols);
+  const delBtn = document.getElementById('rep-delete-btn'); if(delBtn) delBtn.style.display='inline-block';
+}
+async function deleteCurrentCustomReport(){
+  const sel = document.getElementById('rep-type');
+  if(!sel || !sel.value.startsWith('custom:')) return;
+  const id = sel.value.split(':')[1];
+  if(!confirm('Delete this custom report?')) return;
+  const { error } = await sb.from('custom_reports').delete().eq('id', id);
+  if(error){ toast(error.message, true); return; }
+  toast('Custom report deleted'); renderCompanyApp('reports');
 }
 
 // ---- PO creation ----
@@ -2515,6 +2693,55 @@ async function setVendorStatus(id, status){
 }
 
 // ---- Team management ----
+// ---- Team member tab-access modal (presets + custom checkboxes) ----
+const ALL_TABS = [['dashboard','Dashboard'],['pos','Purchase Orders'],['invoices','Invoices / Approvals'],['payables','Payables'],['payments','Payments'],['reports','Reports'],['vendors','Vendors']];
+const ROLE_PRESETS = {
+  full:      ['dashboard','pos','invoices','payables','payments','reports','vendors'],
+  viewonly:  ['dashboard','reports'],
+  payments:  ['dashboard','payables','payments'],
+  procurement:['dashboard','pos','vendors'],
+  invoices:  ['dashboard','invoices']
+};
+async function openRoleModal(userId){
+  const { data: u, error } = await sb.from('company_users').select('*').eq('id', userId).single();
+  if(error){ toast(error.message, true); return; }
+  const current = Array.isArray(u.allowed_tabs) && u.allowed_tabs.length ? u.allowed_tabs : ROLE_PRESETS.full;
+  showModal(`
+    <span class="close-x" onclick="closeModal()">✕</span>
+    <h3>Tab access — ${u.name||u.email}</h3>
+    <p class="muted" style="font-size:13px;">Pick a preset, then fine-tune the exact tabs this member can see. They won't see any tab that's unchecked.</p>
+    <label style="display:block;margin-top:8px;">Quick presets</label>
+    <div style="display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 12px;">
+      <button class="btn btn-sm" onclick="applyRolePreset('full')">Full access</button>
+      <button class="btn btn-sm" onclick="applyRolePreset('viewonly')">View only</button>
+      <button class="btn btn-sm" onclick="applyRolePreset('payments')">Payments</button>
+      <button class="btn btn-sm" onclick="applyRolePreset('procurement')">Procurement</button>
+      <button class="btn btn-sm" onclick="applyRolePreset('invoices')">Invoices</button>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">
+      ${ALL_TABS.map(([k,l])=>`<label style="display:flex;align-items:center;gap:8px;font-size:13.5px;font-weight:400;text-transform:none;letter-spacing:0;">
+        <input type="checkbox" class="role-tab" value="${k}" ${current.includes(k)?'checked':''} style="width:auto;margin:0;"/> ${l}
+      </label>`).join('')}
+    </div>
+    <button class="btn btn-primary" style="width:100%;margin-top:14px;" onclick="saveRoleTabs('${userId}')">Save access</button>
+  `);
+}
+function applyRolePreset(preset){
+  const set = ROLE_PRESETS[preset] || [];
+  document.querySelectorAll('.role-tab').forEach(cb=>{ cb.checked = set.includes(cb.value); });
+}
+async function saveRoleTabs(userId){
+  const checked = Array.from(document.querySelectorAll('.role-tab:checked')).map(cb=>cb.value);
+  if(!checked.length){ toast('Select at least one tab', true); return; }
+  // If they have everything, store null (= full access) for cleanliness.
+  const allKeys = ALL_TABS.map(t=>t[0]);
+  const value = checked.length === allKeys.length ? null : checked;
+  const { error } = await sb.from('company_users').update({ allowed_tabs: value }).eq('id', userId);
+  if(error){ toast(error.message, true); return; }
+  await logActivity(state.company.id, 'user_tabs_updated', 'company_user', userId, {tabs: checked});
+  closeModal(); toast('Access updated'); renderCompanyApp('users');
+}
+
 function openNewUserModal(){
   showModal(`
     <span class="close-x" onclick="closeModal()">✕</span>
@@ -2522,9 +2749,17 @@ function openNewUserModal(){
     <label>Email</label><input id="nu-email"/>
     <label style="margin-top:8px;display:block;">Temp password</label><input id="nu-pass"/>
     <label style="margin-top:8px;display:block;">Role</label>
-    <select id="nu-role"><option value="staff">Staff</option><option value="approver">Approver</option><option value="company_admin">Company admin</option></select>
+    <select id="nu-role" onchange="document.getElementById('nu-access-wrap').style.display=this.value==='company_admin'?'none':'block';"><option value="staff">Staff</option><option value="approver">Approver</option><option value="company_admin">Company admin</option></select>
     <label style="margin-top:8px;display:block;">Approval level (if approver)</label><input id="nu-level" type="number" value="1" min="1" max="5"/>
-    <button class="btn btn-primary" style="width:100%;margin-top:10px;" onclick="createTeamUser()">Add</button>
+    <div id="nu-access-wrap">
+      <label style="margin-top:10px;display:block;">Tab access (uncheck to hide a tab)</label>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:4px;">
+        ${ALL_TABS.map(([k,l])=>`<label style="display:flex;align-items:center;gap:8px;font-size:13.5px;font-weight:400;text-transform:none;letter-spacing:0;">
+          <input type="checkbox" class="nu-tab" value="${k}" checked style="width:auto;margin:0;"/> ${l}
+        </label>`).join('')}
+      </div>
+    </div>
+    <button class="btn btn-primary" style="width:100%;margin-top:12px;" onclick="createTeamUser()">Add</button>
     <p class="muted" id="nu-msg"></p>
   `);
 }
@@ -2541,8 +2776,12 @@ async function createTeamUser(){
   }
   const { data: sdata, error: serr } = await scratchClient().auth.signUp({ email, password });
   if(serr){ msg.textContent = serr.message; return; }
+  // gather selected tabs (null = full access, e.g. for admin)
+  const checked = Array.from(document.querySelectorAll('.nu-tab:checked')).map(cb=>cb.value);
+  const allKeys = ALL_TABS.map(t=>t[0]);
+  const allowed_tabs = (role==='company_admin' || checked.length===allKeys.length || checked.length===0) ? null : checked;
   const { error } = await sb.from('company_users').insert({
-    company_id: state.company.id, auth_user_id: sdata.user.id, email, role, approval_level, name: email
+    company_id: state.company.id, auth_user_id: sdata.user.id, email, role, approval_level, name: email, allowed_tabs
   });
   if(error){ msg.textContent = error.message; return; }
   closeModal(); toast('Team member added'); renderCompanyApp('users');
