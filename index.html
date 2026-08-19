@@ -95,10 +95,26 @@
   .badge-disabled,.badge-suspended{background:#f8eded;color:#a33;}
 
   /* tabs */
-  .tabs{display:flex;gap:2px;margin-bottom:22px;border-bottom:1px solid var(--border);}
-  .tab{padding:11px 17px;cursor:pointer;font-size:13.5px;font-weight:500;color:var(--ink-soft);border-bottom:2px solid transparent;margin-bottom:-1px;transition:color .14s;}
-  .tab:hover{color:var(--ink);}
-  .tab.active{color:var(--primary);border-bottom-color:var(--primary);font-weight:600;}
+  /* ---- Sidebar layout ---- */
+  .layout{display:flex;min-height:calc(100vh - 60px);}
+  .sidebar{width:210px;flex-shrink:0;background:#fff;border-right:1px solid var(--border);padding:16px 12px;position:sticky;top:60px;height:calc(100vh - 60px);overflow-y:auto;}
+  .sidebar .navlink{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;cursor:pointer;font-size:14px;font-weight:500;color:var(--ink-soft);margin-bottom:2px;transition:background .12s,color .12s;}
+  .sidebar .navlink:hover{background:#f2f4ef;color:var(--ink);}
+  .sidebar .navlink.active{background:var(--primary);color:#fff;font-weight:600;}
+  .sidebar .navlink.active:hover{background:var(--primary-dark);color:#fff;}
+  .main-content{flex:1;min-width:0;max-width:1220px;margin:0 auto;padding:26px 24px 60px;width:100%;}
+  .hamburger{display:none;background:rgba(255,255,255,0.08);color:#fff;border:1px solid rgba(255,255,255,0.16);border-radius:7px;width:38px;height:34px;font-size:18px;cursor:pointer;align-items:center;justify-content:center;}
+  .sidebar-backdrop{display:none;position:fixed;inset:60px 0 0 0;background:rgba(0,0,0,0.35);z-index:39;}
+
+  @media(max-width:820px){
+    .hamburger{display:flex;}
+    .sidebar{position:fixed;top:60px;left:0;z-index:40;transform:translateX(-100%);transition:transform .2s ease;box-shadow:2px 0 16px rgba(0,0,0,0.12);}
+    .sidebar.open{transform:translateX(0);}
+    .sidebar-backdrop.open{display:block;}
+    .main-content{padding:18px 14px 50px;}
+  }
+
+  .tabs{display:none;} /* legacy horizontal tabs hidden; sidebar used instead */
 
   /* login */
   .login-wrap{display:flex;align-items:center;justify-content:center;min-height:100vh;background:linear-gradient(160deg,#16202e 0%,#1d3040 55%,#12433a 100%);padding:20px;}
@@ -392,6 +408,22 @@ function manualHold(inv){
 function totalHold(inv){
   return itcOnHold(inv) + manualHold(inv);
 }
+// Amount still owed on an invoice. If it's marked 'paid', nothing is due
+// (guards against older rows where amount_paid wasn't set). Otherwise it's
+// total minus what's been paid minus what's on hold.
+function amountDue(inv){
+  if(inv.status === 'paid') return 0;
+  const total = Number(inv.total_amount||0);
+  const paid = Number(inv.amount_paid||0);
+  const held = totalHold(inv);
+  return Math.max(0, total - paid - held);
+}
+// Effective amount paid — treats a 'paid' invoice as fully paid even if the
+// amount_paid column wasn't populated by an older version.
+function amountPaidEff(inv){
+  if(inv.status === 'paid') return Number(inv.total_amount||0);
+  return Number(inv.amount_paid||0);
+}
 async function logActivity(companyId, action, entityType, entityId, details){
   try{
     await sb.from('activity_log').insert({
@@ -644,16 +676,33 @@ async function doVendorSignup(){
 // ============================================================
 // SHARED SHELL
 // ============================================================
-function shell(title, roleLabel, bodyHtml){
+function shell(title, roleLabel, bodyHtml, tabs, renderFn){
+  tabs = tabs || [];
+  const nav = tabs.map(([k,l])=>`<div class="navlink ${state.activeTab===k?'active':''}" onclick="closeSidebar();${renderFn}('${k}')">${l}</div>`).join('');
   return `
   <header class="topbar">
-    <h1>Kiy<span class="mark">ra</span>${title?(' <span style="color:#7d8894;font-weight:400;">/ '+title+'</span>'):''}</h1>
+    <div style="display:flex;align-items:center;gap:12px;">
+      <button class="hamburger" onclick="toggleSidebar()" aria-label="Menu">☰</button>
+      <h1>Kiy<span class="mark">ra</span>${title?(' <span style="color:#7d8894;font-weight:400;">/ '+title+'</span>'):''}</h1>
+    </div>
     <div style="display:flex;align-items:center;gap:14px;">
       <span class="who">${roleLabel}</span>
       <button class="btn btn-sm" onclick="signOut()">Sign out</button>
     </div>
   </header>
-  <div class="app">${bodyHtml}</div>`;
+  <div class="layout">
+    <div class="sidebar-backdrop" id="sidebarBackdrop" onclick="closeSidebar()"></div>
+    <nav class="sidebar" id="sidebar">${nav}</nav>
+    <div class="main-content">${bodyHtml}</div>
+  </div>`;
+}
+function toggleSidebar(){
+  document.getElementById('sidebar')?.classList.toggle('open');
+  document.getElementById('sidebarBackdrop')?.classList.toggle('open');
+}
+function closeSidebar(){
+  document.getElementById('sidebar')?.classList.remove('open');
+  document.getElementById('sidebarBackdrop')?.classList.remove('open');
 }
 
 // ============================================================
@@ -664,10 +713,8 @@ async function renderSuperadmin(tab){
   try { history.replaceState(null, '', '#' + state.activeTab); } catch(e){}
   const { data: companies } = await sb.from('companies').select('*').order('created_at', {ascending:false});
 
-  let body = `<div class="tabs">
-    <div class="tab ${state.activeTab==='companies'?'active':''}" onclick="renderSuperadmin('companies')">Companies</div>
-    <div class="tab ${state.activeTab==='activity'?'active':''}" onclick="renderSuperadmin('activity')">Global Activity</div>
-  </div>`;
+  const saTabs = [['companies','Companies'],['activity','Global Activity']];
+  let body = '';
 
   if(state.activeTab === 'companies'){
     const active = companies.filter(c=>c.status==='active').length;
@@ -713,7 +760,7 @@ async function renderSuperadmin(tab){
       </table></div>`;
   }
 
-  document.getElementById('root').innerHTML = shell('Superadmin', `${state.profile.name || state.profile.email} · Superadmin`, body);
+  document.getElementById('root').innerHTML = shell('Superadmin', `${state.profile.name || state.profile.email} · Superadmin`, body, saTabs, 'renderSuperadmin');
 }
 
 function openNewCompanyModal(){
@@ -838,8 +885,9 @@ async function renderCompanyApp(tab){
   let tabs = [['dashboard','Dashboard'],['pos','Purchase Orders'],['invoices','Invoices / Approvals'],['payables','Payables'],['payments','Payments'],['reports','Reports'],['vendors','Vendors']];
   if(isAdmin) tabs.push(['users','Team']);
   if(isAdmin) tabs.push(['settings','Settings']);
+  state.__companyTabs = tabs;
 
-  let body = `<div class="tabs">${tabs.map(([k,l])=>`<div class="tab ${state.activeTab===k?'active':''}" onclick="renderCompanyApp('${k}')">${l}</div>`).join('')}</div>`;
+  let body = '';
 
   if(state.activeTab === 'dashboard'){
     const { data: pos } = await sb.from('purchase_orders').select('id,status,total_amount,created_at,vendor_id,vendors(name)').eq('company_id',cid);
@@ -1080,9 +1128,9 @@ async function renderCompanyApp(tab){
       const name = i.vendors?.name || 'Unknown vendor';
       if(!byVendor[vid]) byVendor[vid] = { name, billed:0, paid:0, held:0, due:0, count:0, pending:0 };
       const total = Number(i.total_amount||0);
-      const paid = Number(i.amount_paid||0);
-      const held = totalHold(i);
-      const due = Math.max(0, total - paid - held);
+      const paid = amountPaidEff(i);
+      const held = i.status==='paid' ? 0 : totalHold(i);
+      const due = amountDue(i);
       byVendor[vid].billed += total;
       byVendor[vid].paid += paid;
       byVendor[vid].held += held;
@@ -1290,7 +1338,7 @@ async function renderCompanyApp(tab){
     </div>`;
   }
 
-  document.getElementById('root').innerHTML = shell(state.company.name, `${state.profile.name || state.profile.email} · ${state.role.replace('_',' ')}`, body);
+  document.getElementById('root').innerHTML = shell(state.company.name, `${state.profile.name || state.profile.email} · ${state.role.replace('_',' ')}`, body, tabs, 'renderCompanyApp');
   if(state.activeTab === 'settings' && isAdmin) loadTemplatesList();
 }
 
@@ -1539,9 +1587,9 @@ async function showVendorPending(vid, name){
   const { data: invs } = await sb.from('invoices').select('*, purchase_orders(po_number)').eq('company_id', state.company.id).eq('vendor_id', vid);
   const pending = (invs||[]).map(i=>{
     const total = Number(i.total_amount||0);
-    const paid = Number(i.amount_paid||0);
-    const held = totalHold(i);
-    const due = Math.max(0, total - paid - held);
+    const paid = amountPaidEff(i);
+    const held = i.status==='paid' ? 0 : totalHold(i);
+    const due = amountDue(i);
     return {...i, _due:due, _paid:paid, _held:held};
   }).filter(x=>x._due > 0.01).sort((a,b)=>new Date(a.submitted_at)-new Date(b.submitted_at));
   const totalDue = pending.reduce((s,x)=>s+x._due,0);
@@ -1694,8 +1742,8 @@ async function runReport(){
     (invs||[]).filter(i=>inRange(i.submitted_at, from, to)).forEach(i=>{
       const k = i.vendor_id||'?'; const name = i.vendors?.name||'Unknown';
       if(!byV[k]) byV[k]={name,billed:0,paid:0,held:0,due:0};
-      const total=Number(i.total_amount||0), paid=Number(i.amount_paid||0), held=totalHold(i);
-      byV[k].billed+=total; byV[k].paid+=paid; byV[k].held+=held; byV[k].due+=Math.max(0,total-paid-held);
+      const total=Number(i.total_amount||0), paid=amountPaidEff(i), held=i.status==='paid'?0:totalHold(i);
+      byV[k].billed+=total; byV[k].paid+=paid; byV[k].held+=held; byV[k].due+=amountDue(i);
     });
     headers=['Vendor','Billed','Paid','Held','Due'];
     rows=Object.values(byV).sort((a,b)=>b.due-a.due).map(v=>[v.name,v.billed.toFixed(2),v.paid.toFixed(2),v.held.toFixed(2),v.due.toFixed(2)]);
@@ -1731,8 +1779,8 @@ async function runReport(){
     const now = new Date();
     const buckets = {};
     (invs||[]).filter(i=>inRange(i.submitted_at, from, to)).forEach(i=>{
-      const total=Number(i.total_amount||0), paid=Number(i.amount_paid||0), held=totalHold(i);
-      const due=Math.max(0,total-paid-held);
+      const total=Number(i.total_amount||0), paid=amountPaidEff(i), held=i.status==='paid'?0:totalHold(i);
+      const due=amountDue(i);
       if(due<=0.01) return;
       const days = Math.floor((now - new Date(i.submitted_at))/(1000*60*60*24));
       const b = days<=30?'0-30':days<=60?'31-60':days<=90?'61-90':'90+';
@@ -2750,30 +2798,28 @@ async function renderVendorApp(tab){
   const vid = state.profile.id;
   const notActive = state.profile.status !== 'active';
 
-  let body = `<div class="tabs">
-    ${!notActive ? `<div class="tab ${state.activeTab==='pos'?'active':''}" onclick="renderVendorApp('pos')">My Purchase Orders</div>
-    <div class="tab ${state.activeTab==='invoices'?'active':''}" onclick="renderVendorApp('invoices')">My Invoices</div>
-    <div class="tab ${state.activeTab==='reports'?'active':''}" onclick="renderVendorApp('reports')">Reports</div>` : ''}
-    <div class="tab ${state.activeTab==='profile'?'active':''}" onclick="renderVendorApp('profile')">My Profile &amp; Documents</div>
-  </div>`;
+  let vtabs = [];
+  if(!notActive){ vtabs = [['pos','My Purchase Orders'],['invoices','My Invoices'],['reports','Reports']]; }
+  vtabs.push(['profile','My Profile & Documents']);
+  let body = '';
 
   if(notActive && state.activeTab !== 'profile'){
     body += `<div class="card"><p>Your account is <strong>${state.profile.status}</strong>. You'll be able to view POs and submit invoices once ${state.company.name} activates your account.</p>
     <p class="muted">In the meantime, please complete your profile and upload your documents under "My Profile &amp; Documents" — it helps your client activate you faster.</p></div>`;
-    document.getElementById('root').innerHTML = shell(state.company.name, `${state.profile.name} · Vendor`, body);
+    document.getElementById('root').innerHTML = shell(state.company.name, `${state.profile.name} · Vendor`, body, vtabs, 'renderVendorApp');
     return;
   }
 
   if(state.activeTab === 'profile'){
     body += renderVendorProfileForm();
-    document.getElementById('root').innerHTML = shell(state.company.name, `${state.profile.name} · Vendor`, body);
+    document.getElementById('root').innerHTML = shell(state.company.name, `${state.profile.name} · Vendor`, body, vtabs, 'renderVendorApp');
     loadVendorDocLinks();
     return;
   }
 
   if(state.activeTab === 'reports'){
     body += renderVendorReports(vid);
-    document.getElementById('root').innerHTML = shell(state.company.name, `${state.profile.name} · Vendor`, body);
+    document.getElementById('root').innerHTML = shell(state.company.name, `${state.profile.name} · Vendor`, body, vtabs, 'renderVendorApp');
     setTimeout(()=>runVendorReport(vid), 30);
     return;
   }
@@ -2816,7 +2862,7 @@ async function renderVendorApp(tab){
     </div>`;
   }
 
-  document.getElementById('root').innerHTML = shell(state.company.name, `${state.profile.name} · Vendor`, body);
+  document.getElementById('root').innerHTML = shell(state.company.name, `${state.profile.name} · Vendor`, body, vtabs, 'renderVendorApp');
 }
 
 function renderVendorReports(vid){
@@ -2845,7 +2891,7 @@ async function runVendorReport(vid){
     const { data: invs } = await sb.from('invoices').select('*, purchase_orders(po_number)').eq('vendor_id',vid);
     const list=(invs||[]).filter(i=>inRange(i.submitted_at,from,to)).sort((a,b)=>new Date(b.submitted_at)-new Date(a.submitted_at));
     headers=['Invoice #','PO','Total','Paid','Held','Due','Status','Date'];
-    rows=list.map(i=>{const t=Number(i.total_amount||0),p=Number(i.amount_paid||0),h=totalHold(i);return [i.invoice_number,i.purchase_orders?.po_number||'',t.toFixed(2),p.toFixed(2),h.toFixed(2),Math.max(0,t-p-h).toFixed(2),i.status,fmtDate(i.submitted_at)];});
+    rows=list.map(i=>{const t=Number(i.total_amount||0),p=amountPaidEff(i),h=i.status==='paid'?0:totalHold(i);return [i.invoice_number,i.purchase_orders?.po_number||'',t.toFixed(2),p.toFixed(2),h.toFixed(2),amountDue(i).toFixed(2),i.status,fmtDate(i.submitted_at)];});
     moneyCols=[2,3,4,5]; title='Invoice statement';
     summary=`${list.length} invoice(s)`;
   } else if(type==='payments'){
@@ -2857,7 +2903,7 @@ async function runVendorReport(vid){
     summary=`Total received: ${fmtMoney(list.reduce((s,p)=>s+Number(p.amount),0))}`;
   } else {
     const { data: invs } = await sb.from('invoices').select('*, purchase_orders(po_number)').eq('vendor_id',vid);
-    const list=(invs||[]).filter(i=>inRange(i.submitted_at,from,to)).map(i=>{const t=Number(i.total_amount||0),p=Number(i.amount_paid||0),h=totalHold(i);return {...i,_due:Math.max(0,t-p-h),_held:h};}).filter(x=>x._due>0.01);
+    const list=(invs||[]).filter(i=>inRange(i.submitted_at,from,to)).map(i=>{const h=i.status==='paid'?0:totalHold(i);return {...i,_due:amountDue(i),_held:h};}).filter(x=>x._due>0.01);
     headers=['Invoice #','PO','Due','Held','Hold reason','Date'];
     rows=list.map(x=>[x.invoice_number,x.purchase_orders?.po_number||'',x._due.toFixed(2),x._held.toFixed(2),x.manual_hold_reason||(itcOnHold(x)>0?'GST awaiting GSTR-2B':''),fmtDate(x.submitted_at)]);
     moneyCols=[2,3]; title='Outstanding / due to me';
